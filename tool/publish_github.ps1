@@ -61,10 +61,20 @@ try {
         Write-Host 'Not pushed. The commit is saved locally; run this file again when ready.'
     } else {
         if (-not (git remote)) { git remote add origin $remote }
-        git push -u origin main
-        if ($LASTEXITCODE -ne 0) {
-            throw 'git push failed. If the repository on GitHub is not empty (for example it has a README), run: git pull --rebase origin main, then run this file again.'
+        # The repository on GitHub may already hold files created on the site
+        # (README, LICENSE). Take them in first; where the same file exists in
+        # both places, the local version wins.
+        git fetch origin main
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host 'Joining with what is already on GitHub...'
+            git pull --rebase -X theirs origin main
+            if ($LASTEXITCODE -ne 0) {
+                git rebase --abort
+                throw 'Could not join the local files with the files already on GitHub.'
+            }
         }
+        git push -u origin main
+        if ($LASTEXITCODE -ne 0) { throw 'git push failed.' }
         Step 'All done'
         Write-Host 'Published: https://github.com/ColdVision/ColdVPN' -ForegroundColor Green
     }
