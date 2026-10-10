@@ -1,0 +1,215 @@
+{
+ "exclude_files": [
+  "Global/Youtube/youtube_m.youtube_insta_meta_torrent_0.0.7.bat"
+ ],
+ "services": [
+  {
+   "name": "AWS / Amazon",
+   "from": [
+    "Global/AWS_eu-us"
+   ],
+   "v2fly": [
+    "aws",
+    "amazon"
+   ]
+  },
+  {
+   "name": "ChatGPT (OpenAI)",
+   "from": [
+    "Global/ChatGPT(OpenAI)"
+   ],
+   "v2fly": [
+    "openai"
+   ]
+  },
+  {
+   "name": "Claude",
+   "from": [
+    "Global/claude",
+    "Global/ AI_Claude",
+    "Global/anthropic.com"
+   ],
+   "v2fly": [
+    "anthropic"
+   ]
+  },
+  {
+   "name": "Gemini",
+   "from": [
+    "Global/gemini"
+   ],
+   "v2fly": [
+    "google-gemini"
+   ]
+  },
+  {
+   "name": "Grok",
+   "from": [
+    "Global/grok"
+   ],
+   "v2fly": [
+    "xai"
+   ]
+  },
+  {
+   "name": "Google",
+   "from": [
+    "Global/Google"
+   ],
+   "v2fly": [
+    "google"
+   ]
+  },
+  {
+   "name": "YouTube",
+   "from": [
+    "Global/Youtube"
+   ],
+   "v2fly": [
+    "youtube"
+   ]
+  },
+  {
+   "name": "Cloudflare",
+   "from": [
+    "Global/Cloudflare"
+   ],
+   "v2fly": [
+    "cloudflare"
+   ]
+  },
+  {
+   "name": "Discord",
+   "from": [
+    "Global/Discord"
+   ],
+   "v2fly": [
+    "discord"
+   ]
+  },
+  {
+   "name": "Telegram",
+   "from": [
+    "Global/Telegram"
+   ],
+   "v2fly": [
+    "telegram"
+   ]
+  },
+  {
+   "name": "WhatsApp",
+   "from": [
+    "Global/Whatsapp"
+   ],
+   "v2fly": [
+    "whatsapp"
+   ]
+  },
+  {
+   "name": "Facebook",
+   "from": [
+    "Global/Facebook"
+   ],
+   "v2fly": [
+    "facebook"
+   ]
+  },
+  {
+   "name": "Instagram",
+   "from": [
+    "Global/Instagram"
+   ],
+   "v2fly": [
+    "instagram"
+   ]
+  },
+  {
+   "name": "Meta",
+   "from": [
+    "Global/Meta"
+   ],
+   "v2fly": [
+    "meta"
+   ]
+  },
+  {
+   "name": "Twitter (X)",
+   "from": [
+    "Global/Twitter"
+   ],
+   "v2fly": [
+    "twitter",
+    "x"
+   ]
+  },
+  {
+   "name": "TikTok",
+   "from": [
+    "Global/TikTok"
+   ],
+   "v2fly": [
+    "tiktok"
+   ]
+  },
+  {
+   "name": "Spotify",
+   "from": [
+    "Global/Spotify"
+   ],
+   "v2fly": [
+    "spotify"
+   ]
+  },
+  {
+   "name": "SoundCloud",
+   "from": [
+    "Global/SoundCloud"
+   ],
+   "v2fly": [
+    "soundcloud"
+   ]
+  },
+  {
+   "name": "NVIDIA",
+   "from": [
+    "Global/Nvidia"
+   ],
+   "v2fly": [
+    "nvidia"
+   ]
+  },
+  {
+   "name": "RuTracker",
+   "from": [
+    "Global/Rutracker",
+    "RU-RU/rutracker.org.bat"
+   ],
+   "v2fly": [
+    "rutracker"
+   ]
+  },
+  {
+   "name": "Anilibria + AnimeGo",
+   "from": [
+    "Global/anilibria",
+    "Global/animego.org"
+   ],
+   "domains": [
+    "anilibria.tv",
+    "anilibria.top",
+    "animego.org"
+   ]
+  },
+  {
+   "name": "2ip.ru",
+   "from": [
+    "RU-RU/2ip.ru.bat"
+   ],
+   "domains": [
+    "2ip.ru",
+    "2ip.io"
+   ]
+  }
+ ],
+ "_comment": "from — папки и файлы репозитория RockBlack-VPN/ip-address с IP-диапазонами; v2fly — списки доменов из v2fly/domain-list-community (data/<имя>); domains — домены, заданные вручную."
+}

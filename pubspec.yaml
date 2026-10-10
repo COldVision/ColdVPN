@@ -1,0 +1,46 @@
+name: split_vpn
+description: VPN-клиент на AmneziaWG с маршрутизацией только выбранных сервисов.
+publish_to: none
+version: 0.0.1+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  dartssh2: ^4.1.0
+  path_provider: ^2.1.0
+  file_selector: ^1.0.3
+  # QR-коды: показ и чтение с картинки.
+  qr_flutter: ^4.1.0
+  zxing2: ^0.2.3
+  image: ^4.2.0
+  # Архивы репозиториев со списками сервисов.
+  archive: ">=3.6.0 <5.0.0"
+  # Окно и значок в трее. Версии до перехода этих пакетов на новый API.
+  window_manager: ">=0.4.2 <0.6.0"
+  tray_manager: ">=0.5.0 <0.6.0"
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/services.json
+    - assets/install_awg.sh
+    - assets/diagnose.sh
+    - assets/selection.json
+    - assets/tray_icon.ico
+    - assets/flags.png
+    - assets/logo.png
+  fonts:
+    - family: Onest
+      fonts:
+        - asset: assets/fonts/Onest.ttf
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono.ttf

@@ -1,0 +1,6 @@
+analyzer:
+  errors:
+    unawaited_futures: ignore
+  exclude:
+    - build/**
+    - windows/**
