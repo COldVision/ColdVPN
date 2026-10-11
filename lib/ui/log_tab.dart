@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io' show Platform;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../models.dart';
 import '../route_input.dart';
+import 'files.dart';
 import 'shell.dart';
 import 'theme.dart';
+import '../l10n.dart';
 
 enum _LogView { events, routes, raw }
 
@@ -33,19 +35,17 @@ class _LogTabState extends State<LogTab> {
 
   Future<void> _saveLog() async {
     try {
-      final location = await getSaveLocation(
-        suggestedName: 'coldvpn-log.txt',
-        acceptedTypeGroups: const [
-          XTypeGroup(label: 'Текст', extensions: ['txt']),
-        ],
+      final note = savedNote(
+        tr('Журнал сохранён'),
+        await saveTextFile(
+          name: 'coldvpn-log.txt',
+          text: state.logText,
+          type: XTypeGroup(label: tr('Текст'), extensions: ['txt']),
+        ),
       );
-      if (location == null) return;
-      var path = location.path;
-      if (!path.toLowerCase().endsWith('.txt')) path = '$path.txt';
-      await File(path).writeAsString(state.logText);
-      if (mounted) showNote(context, 'Журнал сохранён: $path');
+      if (mounted && note != null) showNote(context, note);
     } catch (e) {
-      if (mounted) showNote(context, 'Не удалось сохранить журнал: $e');
+      if (mounted) showNote(context, tr('Не удалось сохранить журнал: {0}', [e]));
     }
   }
 
@@ -54,14 +54,14 @@ class _LogTabState extends State<LogTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const TabHeader(title: 'Журнал'),
+        TabHeader(title: tr('Журнал')),
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
           child: CvSegments<_LogView>(
-            options: const {
-              _LogView.events: 'События',
-              _LogView.routes: 'Маршруты',
-              _LogView.raw: 'Подробно',
+            options: {
+              _LogView.events: tr('События'),
+              _LogView.routes: tr('Маршруты'),
+              _LogView.raw: tr('Подробно'),
             },
             selected: _view,
             onChanged: (view) => setState(() => _view = view),
@@ -101,13 +101,13 @@ class _LogTabState extends State<LogTab> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               CvButton(
-                label: 'Запустить диагностику',
+                label: tr('Запустить диагностику'),
                 kind: CvButtonKind.primary,
                 onTap: _diagnose,
               ),
               const SizedBox(height: 6),
               Text(
-                'Проверит клиент, связь, DNS, маршруты, сервисы и сервер.',
+                tr('Проверит клиент, связь, DNS, маршруты, сервисы и сервер.'),
                 textAlign: TextAlign.center,
                 style: tx(12, c: C.muted, h: 1.45),
               ),
@@ -125,7 +125,7 @@ class _LogTabState extends State<LogTab> {
         if (feed.isEmpty)
           CvCard(
             child: Text(
-              'Событий пока нет. Они появятся, когда вы включите VPN.',
+              tr('Событий пока нет. Они появятся, когда вы включите VPN.'),
               style: tx(13, c: C.muted, h: 1.45),
             ),
           ),
@@ -153,8 +153,8 @@ class _LogTabState extends State<LogTab> {
             padding: const EdgeInsets.only(bottom: 10),
             child: CvCard(
               child: Text(
-                'Включён режим «Весь трафик»: через VPN идёт всё, списки ниже '
-                'сейчас не используются.',
+                tr('Включён режим «Весь трафик»: через VPN идёт всё, списки ниже '
+                'сейчас не используются.'),
                 style: tx(13, c: C.text, h: 1.45),
               ),
             ),
@@ -164,19 +164,19 @@ class _LogTabState extends State<LogTab> {
           line: const Color.fromRGBO(110, 150, 255, 0.5),
           child: Row(
             children: [
-              _Total(value: '${active.length}', label: 'сервисов'),
-              _Total(value: '${state.enabledRangeCount}', label: 'диапазонов'),
-              _Total(value: '${state.domainRouteCount}', label: 'по доменам'),
+              _Total(value: '${active.length}', label: tr('сервисов')),
+              _Total(value: '${state.enabledRangeCount}', label: tr('диапазонов')),
+              _Total(value: '${state.domainRouteCount}', label: tr('по доменам')),
             ],
           ),
         ),
         const SizedBox(height: 8),
-        const SectionTitle('По сервисам'),
+        SectionTitle(tr('По сервисам')),
         const SizedBox(height: 8),
         if (active.isEmpty)
           CvCard(
             child: Text(
-              'Ни один сервис не включён.',
+              tr('Ни один сервис не включён.'),
               style: tx(13, c: C.muted),
             ),
           )
@@ -226,18 +226,18 @@ class _LogTabState extends State<LogTab> {
           ),
         const SizedBox(height: 6),
         Text(
-          'Первое число — диапазоны из списка, второе — адреса, найденные '
-          'по доменам.',
+          tr('Первое число — диапазоны из списка, второе — адреса, найденные '
+          'по доменам.'),
           style: tx(12, c: C.muted, h: 1.45),
         ),
         const SizedBox(height: 8),
-        const SectionTitle('Найдено по доменам'),
+        SectionTitle(tr('Найдено по доменам')),
         const SizedBox(height: 8),
         if (learned.isEmpty)
           CvCard(
             child: Text(
-              'Пока ничего: адреса появляются, когда программы обращаются к '
-              'сервисам при включённом VPN.',
+              tr('Пока ничего: адреса появляются, когда программы обращаются к '
+              'сервисам при включённом VPN.'),
               style: tx(13, c: C.muted, h: 1.45),
             ),
           ),
@@ -264,19 +264,19 @@ class _LogTabState extends State<LogTab> {
           ),
         const SizedBox(height: 4),
         CvButton(
-          label: 'Забыть найденные адреса',
+          label: tr('Забыть найденные адреса'),
           height: 48,
           onTap: state.learnedTotal == 0
               ? null
               : () {
                   state.forgetLearned();
-                  showNote(context, 'Найденные адреса забыты');
+                  showNote(context, tr('Найденные адреса забыты'));
                 },
         ),
         const SizedBox(height: 6),
         Text(
-          'Сохранено адресов: ${state.learnedTotal}. Приложение найдёт их '
-          'заново, когда сервисы к ним обратятся.',
+          tr('Сохранено адресов: {0}. Приложение найдёт их '
+          'заново, когда сервисы к ним обратятся.', [state.learnedTotal]),
           textAlign: TextAlign.center,
           style: tx(12, c: C.muted, h: 1.45),
         ),
@@ -300,7 +300,7 @@ class _LogTabState extends State<LogTab> {
                 border: Border.all(color: C.cardLine),
               ),
               child: lines.isEmpty
-                  ? Text('Журнал пуст.', style: tx(12, c: C.muted, mono: true))
+                  ? Text(tr('Журнал пуст.'), style: tx(12, c: C.muted, mono: true))
                   : SingleChildScrollView(
                       reverse: true,
                       child: SelectableText(
@@ -318,17 +318,20 @@ class _LogTabState extends State<LogTab> {
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(
-                child: CvButton(
-                  label: 'Журнал туннеля',
-                  height: 48,
-                  onTap: state.collectClientLog,
+              // Отдельный журнал туннеля есть только у клиента для Windows.
+              if (!Platform.isAndroid) ...[
+                Expanded(
+                  child: CvButton(
+                    label: tr('Журнал туннеля'),
+                    height: 48,
+                    onTap: state.collectClientLog,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
+                const SizedBox(width: 10),
+              ],
               Expanded(
                 child: CvButton(
-                  label: 'Сохранить в файл',
+                  label: Platform.isAndroid ? tr('Поделиться журналом') : tr('Сохранить в файл'),
                   height: 48,
                   onTap: _saveLog,
                 ),
@@ -337,7 +340,7 @@ class _LogTabState extends State<LogTab> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Пароли в журнал не попадают.',
+            tr('Пароли в журнал не попадают.'),
             textAlign: TextAlign.center,
             style: tx(12, c: C.muted),
           ),
@@ -454,16 +457,16 @@ class _CheckSheet extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SheetHeader(
-                title: 'Диагностика',
+                title: tr('Диагностика'),
                 subtitle: finished
-                    ? 'Готово: ${plural(done, 'шаг', 'шага', 'шагов')}'
-                    : 'Шаг ${(done + 1).clamp(1, steps.isEmpty ? 1 : steps.length)}'
-                        ' из ${steps.length}',
+                    ? tr('Готово: {0}', [plural(done, tr('шаг'), tr('шага'), tr('шагов'))])
+                    : tr('Шаг {0}'
+                        ' из {1}', [(done + 1).clamp(1, steps.isEmpty ? 1 : steps.length), steps.length]),
               ),
               const SizedBox(height: 10),
               Semantics(
-                label: 'Ход проверки',
-                value: '$done из ${steps.length}',
+                label: tr('Ход проверки'),
+                value: tr('{0} из {1}', [done, steps.length]),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(3),
                   child: LinearProgressIndicator(
@@ -516,19 +519,19 @@ class _CheckSheet extends StatelessWidget {
                   children: [
                     Expanded(
                       child: CvButton(
-                        label: 'Повторить',
+                        label: tr('Повторить'),
                         onTap: state.runChecks,
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: CvButton(
-                        label: 'Скопировать отчёт',
+                        label: tr('Скопировать отчёт'),
                         kind: CvButtonKind.primary,
                         onTap: () => copyText(
                           context,
                           state.checkReport,
-                          'Отчёт скопирован',
+                          tr('Отчёт скопирован'),
                         ),
                       ),
                     ),

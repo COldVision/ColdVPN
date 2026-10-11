@@ -1,11 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../android_tunnel.dart';
 import '../app_state.dart';
 import '../catalog.dart';
 import '../models.dart';
 import 'route_sheet.dart';
+import 'section_sheets.dart';
 import 'shell.dart';
 import 'theme.dart';
+import '../l10n.dart';
 
 /// Вкладка «Сервисы»: кнопка включения, режим маршрутизации и группы.
 class ServicesTab extends StatefulWidget {
@@ -24,6 +29,45 @@ class _ServicesTabState extends State<ServicesTab> {
 
   AppState get state => widget.state;
 
+  // Прокрутка списка, пока ресурс тащат у верхнего или нижнего края.
+  final _scroll = ScrollController();
+  final _listKey = GlobalKey();
+  Timer? _autoScroll;
+  double _scrollStep = 0;
+
+  @override
+  void dispose() {
+    _autoScroll?.cancel();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// [position] — где сейчас палец или курсор с ресурсом; null — отпустили.
+  void _dragAt(Offset? position) {
+    final box = _listKey.currentContext?.findRenderObject() as RenderBox?;
+    if (position == null || box == null) {
+      _autoScroll?.cancel();
+      _autoScroll = null;
+      return;
+    }
+    // Чем ближе к краю, тем быстрее: до 16 точек за кадр.
+    const edge = 80.0;
+    final y = box.globalToLocal(position).dy;
+    final over = y < edge
+        ? y - edge
+        : y > box.size.height - edge
+            ? y - (box.size.height - edge)
+            : 0.0;
+    _scrollStep = over.clamp(-edge, edge) / edge * 16;
+    _autoScroll ??= Timer.periodic(const Duration(milliseconds: 16), (_) {
+      if (_scrollStep == 0 || !_scroll.hasClients) return;
+      final range = _scroll.position;
+      _scroll.jumpTo((_scroll.offset + _scrollStep)
+          .clamp(range.minScrollExtent, range.maxScrollExtent)
+          .toDouble());
+    });
+  }
+
   void _togglePower() {
     if (state.status == VpnStatus.off) {
       state.connect();
@@ -35,7 +79,7 @@ class _ServicesTabState extends State<ServicesTab> {
   @override
   Widget build(BuildContext context) {
     final full = state.settings.fullTunnel;
-    final order = state.groupOrder;
+    final order = state.sections;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -49,16 +93,31 @@ class _ServicesTabState extends State<ServicesTab> {
         ),
         Reveal(
           show: !state.elevated,
-          child: const _Banner(
-            text: 'Приложение запущено без прав администратора — подключение '
+          child: _Banner(
+            text: tr('Приложение запущено без прав администратора — подключение '
                 'не сработает. Закройте его и запустите от имени '
-                'администратора.',
+                'администратора.'),
           ),
         ),
         Reveal(
           show: state.error != null,
           child: _Banner(text: state.error ?? ''),
         ),
+        if (state.isAndroid)
+          // На Android три способа: сервисы по спискам адресов, выбранные
+          // приложения целиком или весь трафик телефона.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+            child: CvSegments<int>(
+              options: {0: tr('Сервисы'), 1: tr('Приложения'), 2: tr('Весь трафик')},
+              selected: full ? 2 : (state.appMode ? 1 : 0),
+              onChanged: (mode) => state.changeSettings((s) {
+                s.fullTunnel = mode == 2;
+                s.appMode = mode == 1;
+              }),
+            ),
+          )
+        else
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
           child: CvCard(
@@ -74,14 +133,14 @@ class _ServicesTabState extends State<ServicesTab> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Весь трафик через VPN',
+                        tr('Весь трафик через VPN'),
                         style: tx(14, w: w600, c: C.white),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         full
-                            ? 'Переключатели сервисов заблокированы'
-                            : 'Сейчас — только включённые сервисы',
+                            ? tr('Переключатели сервисов заблокированы')
+                            : tr('Сейчас — только включённые сервисы'),
                         style: tx(12, c: C.muted),
                       ),
                     ],
@@ -89,7 +148,7 @@ class _ServicesTabState extends State<ServicesTab> {
                 ),
                 CvSwitch(
                   value: full,
-                  label: 'Весь трафик через VPN',
+                  label: tr('Весь трафик через VPN'),
                   onChanged: (value) =>
                       state.changeSettings((s) => s.fullTunnel = value),
                 ),
@@ -97,8 +156,13 @@ class _ServicesTabState extends State<ServicesTab> {
             ),
           ),
         ),
+        if (state.appMode && !full)
+          Expanded(child: _AppList(state: state))
+        else
         Expanded(
           child: ReorderableListView.builder(
+            key: _listKey,
+            scrollController: _scroll,
             padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
             buildDefaultDragHandles: false,
             itemCount: order.length,
@@ -110,9 +174,16 @@ class _ServicesTabState extends State<ServicesTab> {
               type: MaterialType.transparency,
               child: Opacity(opacity: 0.9, child: child),
             ),
+            footer: _AddButton(
+              label: tr('Новый раздел'),
+              center: true,
+              onTap: () async {
+                final id = await showSectionSheet(context, state);
+                if (id != null && mounted) setState(() => _open = id);
+              },
+            ),
             itemBuilder: (context, index) {
-              final group =
-                  serviceGroups.firstWhere((g) => g.id == order[index]);
+              final group = order[index];
               return Padding(
                 key: ValueKey(group.id),
                 padding: const EdgeInsets.only(bottom: 10),
@@ -122,6 +193,7 @@ class _ServicesTabState extends State<ServicesTab> {
                   index: index,
                   open: _open == group.id,
                   dimmed: full,
+                  onDrag: _dragAt,
                   onToggle: () => setState(
                     () => _open = _open == group.id ? null : group.id,
                   ),
@@ -131,6 +203,135 @@ class _ServicesTabState extends State<ServicesTab> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Список приложений телефона с переключателями (только Android).
+class _AppList extends StatefulWidget {
+  const _AppList({required this.state});
+
+  final AppState state;
+
+  @override
+  State<_AppList> createState() => _AppListState();
+}
+
+class _AppListState extends State<_AppList> {
+  final _search = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.state.apps.isEmpty) widget.state.loadApps();
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.state;
+    final query = _search.text.trim().toLowerCase();
+    final shown = [
+      for (final app in state.apps)
+        if (query.isEmpty ||
+            app.label.toLowerCase().contains(query) ||
+            app.package.toLowerCase().contains(query))
+          app,
+    ];
+    // Включённые — наверху, дальше по алфавиту.
+    final picked = shown.where((a) => state.enabledApps.contains(a.package));
+    final rest = shown.where((a) => !state.enabledApps.contains(a.package));
+    final ordered = [...picked, ...rest];
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
+      children: [
+        CvField(
+          controller: _search,
+          label: tr('Приложения, которые идут через VPN целиком'),
+          hint: tr('Поиск по названию'),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 10),
+        if (state.loadingApps && state.apps.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(
+              child: CircularProgressIndicator(strokeWidth: 3, color: C.soft),
+            ),
+          )
+        else if (ordered.isEmpty)
+          CvCard(
+            child: Text(
+              state.apps.isEmpty
+                  ? tr('Не удалось получить список приложений.')
+                  : tr('Ничего не найдено.'),
+              style: tx(13, c: C.muted),
+            ),
+          ),
+        for (final app in ordered)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: _AppRow(state: state, app: app),
+          ),
+      ],
+    );
+  }
+}
+
+class _AppRow extends StatelessWidget {
+  const _AppRow({required this.state, required this.app});
+
+  final AppState state;
+  final AndroidApp app;
+
+  @override
+  Widget build(BuildContext context) {
+    final on = state.enabledApps.contains(app.package);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      constraints: const BoxConstraints(minHeight: 56),
+      padding: const EdgeInsets.fromLTRB(14, 6, 2, 6),
+      decoration: BoxDecoration(
+        color: on ? C.rowOn : C.rowOff,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: on ? const Color.fromRGBO(130, 150, 255, 0.55) : C.rowLine,
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  app.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: tx(14, w: w600, c: C.white),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  app.package,
+                  overflow: TextOverflow.ellipsis,
+                  style: tx(12, c: C.muted, mono: true),
+                ),
+              ],
+            ),
+          ),
+          CvSwitch(
+            value: on,
+            label: app.label,
+            onChanged: (value) => state.toggleApp(app.package, value),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -181,21 +382,25 @@ class _PowerButton extends StatelessWidget {
     String title;
     String detail;
     if (busy) {
-      title = 'Подключаюсь…';
-      detail = 'Нажмите для отмены';
+      title = tr('Подключаюсь…');
+      detail = tr('Нажмите для отмены');
     } else if (on) {
-      title = 'VPN включён';
+      title = tr('VPN включён');
       detail = state.settings.fullTunnel
-          ? 'Весь трафик'
-          : 'В туннеле: ${state.enabled.length}';
+          ? tr('Весь трафик')
+          : (state.appMode
+              ? tr('Приложений: {0}', [state.enabledApps.length])
+              : tr('В туннеле: {0}', [state.enabled.length]));
     } else {
-      title = 'VPN выключен';
+      title = tr('VPN выключен');
       if (state.server == null) {
-        detail = 'Добавьте сервер';
+        detail = tr('Добавьте сервер');
       } else if (!state.canConnect) {
-        detail = 'Включите сервисы ниже';
+        detail = state.appMode
+            ? tr('Включите приложения ниже')
+            : tr('Включите сервисы ниже');
       } else {
-        detail = 'Нажмите для включения';
+        detail = tr('Нажмите для включения');
       }
     }
 
@@ -384,14 +589,18 @@ class _GroupCard extends StatelessWidget {
     required this.open,
     required this.dimmed,
     required this.onToggle,
+    required this.onDrag,
   });
 
   final AppState state;
-  final ServiceGroup group;
+  final Section group;
   final int index;
   final bool open;
   final bool dimmed;
   final VoidCallback onToggle;
+
+  /// Сообщает, где сейчас тащат ресурс (null — отпустили).
+  final ValueChanged<Offset?> onDrag;
 
   @override
   Widget build(BuildContext context) {
@@ -399,39 +608,38 @@ class _GroupCard extends StatelessWidget {
     final onCount = items.where((s) => state.enabled.contains(s.id)).length;
     final lit = onCount > 0 && !dimmed;
     final allOn = items.isNotEmpty && onCount == items.length;
-    final custom = group.id == customGroupId;
-    final count = custom && items.isEmpty
-        ? 'Пока пусто'
-        : 'Включено $onCount из ${items.length}';
+    final count = items.isEmpty
+        ? tr('Пока пусто')
+        : tr('Включено {0} из {1}', [onCount, items.length]);
 
-    return CvCard(
+    // Ресурс, брошенный на раздел (а не на строку в нём), встаёт в конец.
+    return DragTarget<String>(
+      onAcceptWithDetails: (drop) => state.placeResource(drop.data, group.id),
+      builder: (context, incoming, _) => CvCard(
       padding: EdgeInsets.zero,
       color: open ? C.cardOpen : C.card,
-      line: lit ? C.cardLineLit : const Color.fromRGBO(120, 140, 255, 0.2),
+      line: incoming.isNotEmpty
+          ? C.teal
+          : lit
+              ? C.cardLineLit
+              : const Color.fromRGBO(120, 140, 255, 0.2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          // На сенсорном экране раздел берут долгим нажатием на шапку;
+          // ручка слева работает и там, и с мышью.
+          ReorderableDelayedDragStartListener(
+            index: index,
+            enabled: state.isAndroid,
+            child: Row(
             children: [
               ReorderableDragStartListener(
                 index: index,
-                child: Tooltip(
-                  message: 'Перетащите, чтобы изменить порядок',
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.grab,
-                    child: Semantics(
-                      label: 'Переместить группу «${group.label}»',
-                      child: const SizedBox(
-                        width: 36,
-                        height: 60,
-                        child: Icon(
-                          Icons.drag_indicator,
-                          size: 18,
-                          color: C.dim,
-                        ),
-                      ),
-                    ),
-                  ),
+                child: _Grip(
+                  width: 36,
+                  height: 60,
+                  hint: tr('Перетащите, чтобы изменить порядок'),
+                  label: tr('Переместить раздел «{0}»', [group.title]),
                 ),
               ),
               Expanded(
@@ -442,7 +650,7 @@ class _GroupCard extends StatelessWidget {
                     onTap: onToggle,
                     borderRadius: BorderRadius.circular(18),
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(2, 8, 14, 8),
+                      padding: const EdgeInsets.fromLTRB(2, 8, 4, 8),
                       child: Row(
                         children: [
                           AnimatedContainer(
@@ -455,7 +663,11 @@ class _GroupCard extends StatelessWidget {
                                   : const Color.fromRGBO(90, 100, 160, 0.35),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: Icon(group.icon, size: 22, color: C.white),
+                            child: Icon(
+                              sectionIcon(group.icon),
+                              size: 22,
+                              color: C.white,
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -464,7 +676,8 @@ class _GroupCard extends StatelessWidget {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  group.label,
+                                  group.title,
+                                  overflow: TextOverflow.ellipsis,
                                   style: tx(16, w: w600, c: C.white),
                                 ),
                                 const SizedBox(height: 2),
@@ -475,23 +688,39 @@ class _GroupCard extends StatelessWidget {
                               ],
                             ),
                           ),
-                          AnimatedRotation(
-                            turns: open ? 0.5 : 0,
-                            duration: const Duration(milliseconds: 320),
-                            curve: Curves.easeOutCubic,
-                            child: const Icon(
-                              Icons.expand_more,
-                              size: 22,
-                              color: C.soft,
-                            ),
-                          ),
                         ],
                       ),
                     ),
                   ),
                 ),
               ),
+              CvIconButton(
+                icon: Icons.more_vert,
+                tooltip: tr('Действия с разделом «{0}»', [group.title]),
+                framed: false,
+                onTap: () => showSectionMenu(context, state, group),
+              ),
+              InkWell(
+                onTap: onToggle,
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 40,
+                  height: 44,
+                  child: AnimatedRotation(
+                    turns: open ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOutCubic,
+                    child: const Icon(
+                      Icons.expand_more,
+                      size: 22,
+                      color: C.soft,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
             ],
+          ),
           ),
           AnimatedSize(
             duration: const Duration(milliseconds: 320),
@@ -504,11 +733,12 @@ class _GroupCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (custom)
+                        if (items.isEmpty)
                           Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: _AddRouteButton(
-                              onTap: () => showRouteSheet(context, state),
+                            padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
+                            child: Text(
+                              tr('В разделе пока ничего нет.'),
+                              style: tx(13, c: C.muted),
                             ),
                           ),
                         for (final s in items)
@@ -517,10 +747,19 @@ class _GroupCard extends StatelessWidget {
                             child: _ServiceRow(
                               state: state,
                               service: s,
-                              custom: custom,
+                              sectionId: group.id,
                               dimmed: dimmed,
+                              onDrag: onDrag,
                             ),
                           ),
+                        _AddButton(
+                          label: tr('Добавить ресурс'),
+                          onTap: () => showRouteSheet(
+                            context,
+                            state,
+                            section: group.id,
+                          ),
+                        ),
                         if (items.length > 1 && !dimmed)
                           Align(
                             alignment: Alignment.centerRight,
@@ -536,7 +775,7 @@ class _GroupCard extends StatelessWidget {
                                   vertical: 9,
                                 ),
                                 child: Text(
-                                  allOn ? 'Выключить все' : 'Включить все',
+                                  allOn ? tr('Выключить все') : tr('Включить все'),
                                   style: tx(13, c: C.link),
                                 ),
                               ),
@@ -548,14 +787,22 @@ class _GroupCard extends StatelessWidget {
           ),
         ],
       ),
+      ),
     );
   }
 }
 
-class _AddRouteButton extends StatelessWidget {
-  const _AddRouteButton({required this.onTap});
+/// Кнопка «добавить»: ресурс в раздел или новый раздел.
+class _AddButton extends StatelessWidget {
+  const _AddButton({
+    required this.label,
+    required this.onTap,
+    this.center = false,
+  });
 
+  final String label;
   final VoidCallback onTap;
+  final bool center;
 
   @override
   Widget build(BuildContext context) {
@@ -571,13 +818,12 @@ class _AddRouteButton extends StatelessWidget {
           border: Border.all(color: const Color.fromRGBO(160, 150, 255, 0.6)),
         ),
         child: Row(
+          mainAxisAlignment:
+              center ? MainAxisAlignment.center : MainAxisAlignment.start,
           children: [
             const Icon(Icons.add, size: 18, color: Color(0xFFDFE4FF)),
             const SizedBox(width: 12),
-            Text(
-              'Добавить домен или IP',
-              style: tx(14, w: w600, c: const Color(0xFFDFE4FF)),
-            ),
+            Text(label, style: tx(14, w: w600, c: const Color(0xFFDFE4FF))),
           ],
         ),
       ),
@@ -589,23 +835,81 @@ class _ServiceRow extends StatelessWidget {
   const _ServiceRow({
     required this.state,
     required this.service,
-    required this.custom,
+    required this.sectionId,
     required this.dimmed,
+    required this.onDrag,
   });
 
   final AppState state;
   final ServiceEntry service;
-  final bool custom;
+  final String sectionId;
   final bool dimmed;
+  final ValueChanged<Offset?> onDrag;
 
   @override
   Widget build(BuildContext context) {
     final on = state.enabled.contains(service.id);
     final lit = on && !dimmed;
+    // Ресурс, брошенный на строку, встаёт перед ней.
+    return DragTarget<String>(
+      onAcceptWithDetails: (drop) =>
+          state.placeResource(drop.data, sectionId, before: service.id),
+      builder: (context, incoming, _) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            height: incoming.isNotEmpty && incoming.first != service.id ? 4 : 0,
+            margin: const EdgeInsets.only(bottom: 2),
+            decoration: BoxDecoration(
+              color: C.teal,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          if (state.isAndroid)
+            LongPressDraggable<String>(
+              data: service.id,
+              dragAnchorStrategy: pointerDragAnchorStrategy,
+              onDragUpdate: (details) => onDrag(details.globalPosition),
+              onDragEnd: (_) => onDrag(null),
+              feedback: _feedback(),
+              child: _row(context, on, lit),
+            )
+          else
+            _row(context, on, lit),
+        ],
+      ),
+    );
+  }
+
+  /// Плашка с названием, которая едет за пальцем или курсором.
+  Widget _feedback() {
+    return Material(
+      type: MaterialType.transparency,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: C.menu,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: C.teal),
+        ),
+        child: Text(service.name, style: tx(14, w: w600, c: C.white)),
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, bool on, bool lit) {
+    final grip = _Grip(
+      width: 30,
+      height: 44,
+      hint: tr('Перетащите на нужное место или на другой раздел'),
+      label: service.name,
+    );
     return AnimatedContainer(
       duration: const Duration(milliseconds: 260),
       constraints: const BoxConstraints(minHeight: 56),
-      padding: const EdgeInsets.fromLTRB(14, 6, 2, 6),
+      padding: const EdgeInsets.fromLTRB(2, 6, 2, 6),
       decoration: BoxDecoration(
         color: lit ? C.rowOn : C.rowOff,
         borderRadius: BorderRadius.circular(14),
@@ -615,6 +919,19 @@ class _ServiceRow extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // С мышью ресурс тянут за ручку; на сенсорном экране — долгим
+          // нажатием на строку (см. build), ручка там только подсказка.
+          if (state.isAndroid)
+            grip
+          else
+            Draggable<String>(
+              data: service.id,
+              dragAnchorStrategy: pointerDragAnchorStrategy,
+              onDragUpdate: (details) => onDrag(details.globalPosition),
+              onDragEnd: (_) => onDrag(null),
+              feedback: _feedback(),
+              child: grip,
+            ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -627,26 +944,19 @@ class _ServiceRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${service.ips.length} IP · ${service.domains.length} доменов',
+                  tr('{0} IP · {1} доменов', [service.ips.length, service.domains.length]),
+                  overflow: TextOverflow.ellipsis,
                   style: tx(12, c: C.muted, mono: true),
                 ),
               ],
             ),
           ),
-          if (custom)
-            CvIconButton(
-              icon: Icons.edit_outlined,
-              tooltip: 'Изменить маршрут «${service.name}»',
-              framed: false,
-              onTap: () {
-                for (final r in state.customRoutes) {
-                  if (r.id == service.id) {
-                    showRouteSheet(context, state, route: r);
-                    break;
-                  }
-                }
-              },
-            ),
+          CvIconButton(
+            icon: Icons.more_vert,
+            tooltip: tr('Действия с ресурсом «{0}»', [service.name]),
+            framed: false,
+            onTap: () => showResourceMenu(context, state, service),
+          ),
           CvSwitch(
             value: on,
             label: service.name,
@@ -656,5 +966,39 @@ class _ServiceRow extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Ручка перетаскивания: шесть точек. Подсказка показывается только с
+/// мышью — на сенсорном экране она перехватывала бы долгое нажатие.
+class _Grip extends StatelessWidget {
+  const _Grip({
+    required this.width,
+    required this.height,
+    required this.hint,
+    required this.label,
+  });
+
+  final double width;
+  final double height;
+  final String hint;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final grip = MouseRegion(
+      cursor: SystemMouseCursors.grab,
+      child: Semantics(
+        label: label,
+        child: SizedBox(
+          width: width,
+          height: height,
+          child: const Icon(Icons.drag_indicator, size: 18, color: C.dim),
+        ),
+      ),
+    );
+    final touch = Theme.of(context).platform == TargetPlatform.android ||
+        Theme.of(context).platform == TargetPlatform.iOS;
+    return touch ? grip : Tooltip(message: hint, child: grip);
   }
 }

@@ -6,6 +6,7 @@ import 'app_state.dart';
 import 'desktop.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
+import 'l10n.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,11 +19,16 @@ Future<void> main(List<String> args) async {
       await DesktopShell(state).init(startHidden: args.contains('--hidden'));
       desktop = true;
     } catch (e) {
-      state.addLog('Не удалось настроить окно и трей: $e');
+      state.addLog(tr('Не удалось настроить окно и трей: {0}', [e]));
     }
   }
 
-  runApp(ColdVpnApp(state: state, handleExit: !desktop));
+  // На Android туннель живёт дольше окна, поэтому при закрытии окна его
+  // снимать не нужно.
+  runApp(ColdVpnApp(
+    state: state,
+    handleExit: !desktop && !state.isAndroid,
+  ));
   state.autoConnect();
   state.autoUpdateLists();
 }

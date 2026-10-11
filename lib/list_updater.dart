@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 
 import 'models.dart';
+import 'l10n.dart';
 
 /// Обновление списков сервисов прямо из исходных репозиториев: диапазоны IP
 /// берутся из RockBlack-VPN/ip-address, домены — из
@@ -134,7 +135,7 @@ void readDomainList(
   if (!seen.add(name)) return;
   final text = lists[name];
   if (text == null) {
-    problems.add('нет списка доменов «$name»');
+    problems.add(tr('нет списка доменов «{0}»', [name]));
     return;
   }
   for (final raw in text.split('\n')) {
@@ -212,7 +213,7 @@ List<ServiceEntry> buildServices(
           .where((p) => !exclude.contains(p))
           .toList();
       if (paths.isEmpty) {
-        problems.add('$name: в репозитории больше нет «$source»');
+        problems.add(tr('{0}: в репозитории больше нет «{1}»', [name, source]));
         continue;
       }
       for (final path in paths) {
@@ -230,7 +231,7 @@ List<ServiceEntry> buildServices(
     }
 
     if (ranges.isEmpty && domains.isEmpty) {
-      problems.add('$name: не найдено ни адресов, ни доменов');
+      problems.add(tr('{0}: не найдено ни адресов, ни доменов', [name]));
       continue;
     }
     result.add(ServiceEntry(
@@ -256,13 +257,13 @@ Future<Map<String, String>> _downloadRepo(
         .getUrl(Uri.parse('https://github.com/$repo/archive/HEAD.zip'));
     final response = await request.close().timeout(const Duration(seconds: 30));
     if (response.statusCode != 200) {
-      throw 'GitHub ответил кодом ${response.statusCode} для $repo';
+      throw tr('GitHub ответил кодом {0} для {1}', [response.statusCode, repo]);
     }
     final bytes = BytesBuilder(copy: false);
     await for (final chunk in response.timeout(const Duration(seconds: 30))) {
       bytes.add(chunk);
       if (bytes.length > 60 * 1024 * 1024) {
-        throw 'архив $repo неожиданно большой';
+        throw tr('архив {0} неожиданно большой', [repo]);
       }
     }
     final archive = ZipDecoder().decodeBytes(bytes.takeBytes());

@@ -1,34 +1,63 @@
 import 'package:flutter/material.dart';
 
-/// Группа сервисов на вкладке «Сервисы».
+/// Раздел из начального набора и сервисы каталога, которые в него попадают.
 class ServiceGroup {
   const ServiceGroup(this.id, this.label, this.icon, this.serviceIds);
 
   final String id;
   final String label;
-  final IconData icon;
+
+  /// Ключ значка из [sectionIcons].
+  final String icon;
   final List<String> serviceIds;
 }
 
 const otherGroupId = 'other';
+
+/// Раздел, куда при переходе с прежних сборок попадают «Мои маршруты».
 const customGroupId = 'custom';
 
-/// Группы в порядке по умолчанию. Сервис, не попавший ни в одну группу,
-/// показывается в «Прочем»; «Мои маршруты» заполняет пользователь.
+/// Значки, из которых выбирается значок раздела.
+const sectionIcons = <String, IconData>{
+  'spark': Icons.auto_awesome,
+  'chat': Icons.chat_bubble_outline,
+  'people': Icons.people_outline,
+  'play': Icons.play_circle_outline,
+  'cloud': Icons.cloud_outlined,
+  'globe': Icons.public,
+  'route': Icons.alt_route,
+  'game': Icons.sports_esports_outlined,
+  'work': Icons.work_outline,
+  'cart': Icons.shopping_cart_outlined,
+  'music': Icons.music_note_outlined,
+  'star': Icons.star_outline,
+};
+
+IconData sectionIcon(String key) => sectionIcons[key] ?? Icons.star_outline;
+
+/// Начальный набор разделов. Дальше пользователь меняет его как хочет;
+/// сервис каталога, не попавший ни в один раздел, идёт в «Прочее».
 const serviceGroups = <ServiceGroup>[
-  ServiceGroup('ai', 'ИИ', Icons.auto_awesome,
-      ['chatgpt-openai', 'claude', 'gemini', 'grok']),
-  ServiceGroup('chat', 'Общение', Icons.chat_bubble_outline,
-      ['discord', 'telegram', 'whatsapp']),
-  ServiceGroup('social', 'Соцсети', Icons.people_outline,
-      ['facebook', 'instagram', 'meta', 'twitter-x', 'tiktok']),
-  ServiceGroup('fun', 'Развлечения', Icons.play_circle_outline,
-      ['youtube', 'spotify', 'soundcloud', 'anilibria-animego', 'rutracker']),
-  ServiceGroup('system', 'Системные', Icons.cloud_outlined,
+  ServiceGroup('ai', 'ИИ', 'spark',
+      ['chatgpt-openai', 'claude', 'gemini', 'grok', 'copilot']),
+  ServiceGroup('chat', 'Общение', 'chat', ['discord', 'telegram', 'whatsapp']),
+  ServiceGroup('social', 'Соцсети', 'people',
+      ['facebook', 'instagram', 'meta', 'twitter-x', 'tiktok', 'snapchat']),
+  ServiceGroup('fun', 'Развлечения', 'play', [
+    'youtube', 'spotify', 'soundcloud', 'anilibria-animego', 'netflix', //
+    'twitch',
+  ]),
+  ServiceGroup('games', 'Игры', 'game',
+      ['blizzard', 'epic-games', 'steam', 'bethesda']),
+  ServiceGroup('system', 'Системные', 'cloud',
       ['aws-amazon', 'cloudflare', 'google', 'nvidia']),
-  ServiceGroup(otherGroupId, 'Прочее', Icons.public, ['2ip-ru']),
-  ServiceGroup(customGroupId, 'Мои маршруты', Icons.alt_route, []),
+  ServiceGroup(otherGroupId, 'Прочее', 'globe',
+      ['2ip-ru', 'figma', 'miro']),
 ];
+
+/// Сервисы, убранные из каталога: у тех, кто ими уже пользовался, они
+/// исчезают из разделов.
+const retiredServices = {'rutracker', 'nnm-club', 'rutor'};
 
 /// Сайт, по которому диагностика проверяет, отвечает ли сервис через VPN.
 const serviceProbeHosts = <String, String>{
@@ -51,9 +80,18 @@ const serviceProbeHosts = <String, String>{
   'spotify': 'open.spotify.com',
   'soundcloud': 'soundcloud.com',
   'nvidia': 'www.nvidia.com',
-  'rutracker': 'rutracker.org',
   'anilibria-animego': 'anilibria.top',
   '2ip-ru': '2ip.ru',
+  'copilot': 'copilot.microsoft.com',
+  'snapchat': 'www.snapchat.com',
+  'netflix': 'www.netflix.com',
+  'twitch': 'www.twitch.tv',
+  'blizzard': 'www.blizzard.com',
+  'epic-games': 'store.epicgames.com',
+  'steam': 'store.steampowered.com',
+  'bethesda': 'bethesda.net',
+  'figma': 'www.figma.com',
+  'miro': 'miro.com',
 };
 
 /// Флаги стран лежат одной картинкой-сеткой `assets/flags.png`:

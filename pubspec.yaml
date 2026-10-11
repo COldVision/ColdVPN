@@ -1,7 +1,7 @@
 name: split_vpn
 description: VPN-клиент на AmneziaWG с маршрутизацией только выбранных сервисов.
 publish_to: none
-version: 0.0.1+1
+version: 0.1.0+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -22,6 +22,9 @@ dependencies:
   # Окно и значок в трее. Версии до перехода этих пакетов на новый API.
   window_manager: ">=0.4.2 <0.6.0"
   tray_manager: ">=0.5.0 <0.6.0"
+  # Телефон: окно «Поделиться» и сканер QR-кодов.
+  share_plus: ">=10.1.0 <11.0.0"
+  mobile_scanner: ">=7.0.0 <8.0.0"
 
 dev_dependencies:
   flutter_test:

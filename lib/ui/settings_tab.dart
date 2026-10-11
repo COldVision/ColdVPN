@@ -4,14 +4,16 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import 'files.dart';
 import 'shell.dart';
 import 'theme.dart';
+import '../l10n.dart';
 
 const repositoryUrl = 'https://github.com/ColdVision/ColdVPN';
-const appVersion = '0.0.1';
+const appVersion = '0.1.0';
 
-const _settingsFiles =
-    XTypeGroup(label: 'Настройки ColdVPN', extensions: ['json']);
+XTypeGroup get _settingsFiles =>
+    XTypeGroup(label: tr('Настройки ColdVPN'), extensions: ['json']);
 
 /// Вкладка «Настройки».
 class SettingsTab extends StatefulWidget {
@@ -74,30 +76,31 @@ class _SettingsTabState extends State<SettingsTab> {
 
   Future<void> _export() async {
     try {
-      final location = await getSaveLocation(
-        suggestedName: 'coldvpn-settings.json',
-        acceptedTypeGroups: const [_settingsFiles],
+      final note = savedNote(
+        tr('Настройки сохранены'),
+        await saveTextFile(
+          name: 'coldvpn-settings.json',
+          text: state.exportSettings(),
+          type: _settingsFiles,
+          mimeType: 'application/json',
+        ),
       );
-      if (location == null) return;
-      var path = location.path;
-      if (!path.toLowerCase().endsWith('.json')) path = '$path.json';
-      await File(path).writeAsString(state.exportSettings());
-      if (mounted) showNote(context, 'Настройки сохранены: $path');
+      if (mounted && note != null) showNote(context, note);
     } catch (e) {
-      if (mounted) showNote(context, 'Не удалось сохранить настройки: $e');
+      if (mounted) showNote(context, tr('Не удалось сохранить настройки: {0}', [e]));
     }
   }
 
   Future<void> _import() async {
     try {
-      final file = await openFile(acceptedTypeGroups: const [_settingsFiles]);
+      final file = await pickFile(_settingsFiles);
       if (file == null) return;
       final problem = await state.importSettings(await file.readAsString());
       if (!mounted) return;
       _syncDnsField();
-      showNote(context, problem ?? 'Настройки загружены');
+      showNote(context, problem ?? tr('Настройки загружены'));
     } catch (e) {
-      if (mounted) showNote(context, 'Не удалось прочитать файл: $e');
+      if (mounted) showNote(context, tr('Не удалось прочитать файл: {0}', [e]));
     }
   }
 
@@ -106,7 +109,7 @@ class _SettingsTabState extends State<SettingsTab> {
     if (!mounted) return;
     setState(() => _confirmReset = false);
     _syncDnsField();
-    showNote(context, 'Настройки сброшены');
+    showNote(context, tr('Настройки сброшены'));
   }
 
   /// После загрузки или сброса настроек поле своего DNS должно показывать
@@ -120,12 +123,12 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   String _listsNote() {
-    if (state.updatingLists) return 'Загружаю списки с GitHub…';
+    if (state.updatingLists) return tr('Загружаю списки с GitHub…');
     final at = state.listsUpdatedAt;
-    if (at == null) return 'Встроены в эту версию приложения';
+    if (at == null) return tr('Встроены в эту версию приложения');
     String two(int n) => n.toString().padLeft(2, '0');
-    return 'Обновлены ${two(at.day)}.${two(at.month)}.${at.year} в '
-        '${two(at.hour)}:${two(at.minute)}';
+    return tr('Обновлены {0}.{1}.{2} в '
+        '{3}:{4}', [two(at.day), two(at.month), at.year, two(at.hour), two(at.minute)]);
   }
 
   Future<void> _openRepository() async {
@@ -135,7 +138,7 @@ class _SettingsTabState extends State<SettingsTab> {
         return;
       }
     } catch (_) {}
-    if (mounted) await copyText(context, repositoryUrl, 'Ссылка скопирована');
+    if (mounted) await copyText(context, repositoryUrl, tr('Ссылка скопирована'));
   }
 
   @override
@@ -148,38 +151,53 @@ class _SettingsTabState extends State<SettingsTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const TabHeader(title: 'Настройки'),
+        TabHeader(title: tr('Настройки')),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
             children: [
-              const SectionTitle('Запуск'),
+              // Названия языков не переводятся: их должен узнать тот, кто
+              // не читает на текущем языке.
+              const SectionTitle('Язык · Language'),
+              const SizedBox(height: 8),
+              CvSegments<String>(
+                options: const {'ru': 'Русский', 'en': 'English'},
+                selected: appLang,
+                onChanged: state.setLanguage,
+              ),
+              const SizedBox(height: 8),
+              SectionTitle(tr('Запуск')),
               const SizedBox(height: 8),
               CvCard(
                 padding: const EdgeInsets.fromLTRB(14, 4, 2, 4),
                 child: Column(
                   children: [
+                    if (Platform.isWindows)
                     _SwitchRow(
-                      title: 'Запускать вместе с системой',
-                      note: 'При входе в Windows, сразу в трей',
+                      title: tr('Запускать вместе с системой'),
+                      note: tr('При входе в Windows, сразу в трей'),
                       value: state.autostart,
                       onChanged: state.platformSupported
                           ? (value) => state.setAutostart(value)
                           : null,
                     ),
                     _SwitchRow(
-                      title: 'Подключаться при запуске',
-                      note: 'Если в прошлый раз VPN был включён',
+                      title: tr('Подключаться при запуске'),
+                      note: state.isAndroid
+                          ? tr('При открытии приложения, если VPN был включён')
+                          : tr('Если в прошлый раз VPN был включён'),
                       value: settings.connectOnStart,
+                      last: !Platform.isWindows,
                       onChanged: (value) => state.changeSettings(
                         (s) => s.connectOnStart = value,
                         reconnect: false,
                       ),
                     ),
+                    if (Platform.isWindows)
                     _SwitchRow(
-                      title: 'Сворачивать в трей при закрытии',
-                      note: 'VPN продолжит работать в фоне. Выход — через '
-                          'значок в трее',
+                      title: tr('Сворачивать в трей при закрытии'),
+                      note: tr('VPN продолжит работать в фоне. Выход — через '
+                          'значок в трее'),
                       value: settings.closeToTray,
                       last: true,
                       onChanged: state.platformSupported
@@ -192,23 +210,25 @@ class _SettingsTabState extends State<SettingsTab> {
                   ],
                 ),
               ),
+              // Маршруты по доменам есть только на Windows.
+              if (!state.isAndroid) ...[
               const SizedBox(height: 8),
-              const SectionTitle('Маршрутизация'),
+              SectionTitle(tr('Маршрутизация')),
               const SizedBox(height: 8),
               CvCard(
                 padding: const EdgeInsets.fromLTRB(14, 4, 2, 4),
                 child: Column(
                   children: [
                     _SwitchRow(
-                      title: 'Маршруты по доменам',
-                      note: 'Добавлять адреса сервисов на лету через DNS',
+                      title: tr('Маршруты по доменам'),
+                      note: tr('Добавлять адреса сервисов на лету через DNS'),
                       value: settings.domainRouting,
                       onChanged: (value) =>
                           state.changeSettings((s) => s.domainRouting = value),
                     ),
                     _SwitchRow(
-                      title: 'Только IPv4 для сервисов из списка',
-                      note: 'Чтобы трафик не ушёл по IPv6 мимо VPN',
+                      title: tr('Только IPv4 для сервисов из списка'),
+                      note: tr('Чтобы трафик не ушёл по IPv6 мимо VPN'),
                       value: settings.ipv4Only,
                       last: true,
                       onChanged: (value) =>
@@ -217,14 +237,15 @@ class _SettingsTabState extends State<SettingsTab> {
                   ],
                 ),
               ),
+              ],
               const SizedBox(height: 8),
-              const SectionTitle('DNS для сервисов в туннеле'),
+              SectionTitle(tr('DNS для сервисов в туннеле')),
               const SizedBox(height: 8),
               CvSegments<String>(
-                options: const {
+                options: {
                   _cloudflare: 'Cloudflare',
                   _google: 'Google',
-                  'custom': 'Свой',
+                  'custom': tr('Свой'),
                 },
                 subtitles: {
                   _cloudflare: _cloudflare,
@@ -240,7 +261,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   padding: const EdgeInsets.only(top: 10),
                   child: CvField(
                   controller: _dns,
-                  label: 'Адрес своего DNS-сервера',
+                  label: tr('Адрес своего DNS-сервера'),
                   hint: '9.9.9.9',
                   mono: true,
                   keyboardType: TextInputType.number,
@@ -251,19 +272,19 @@ class _SettingsTabState extends State<SettingsTab> {
                   },
                   helper: customValue.isEmpty || _validIp(customValue)
                       ? null
-                      : 'Нужен адрес IPv4, например 9.9.9.9. Пока используется '
-                          '${settings.dns}.',
+                      : tr('Нужен адрес IPv4, например 9.9.9.9. Пока используется '
+                          '{0}.', [settings.dns]),
                 ),
                 ),
               ),
               const SizedBox(height: 6),
               Text(
-                'Через него узнаются адреса только включённых сервисов. '
-                'Остальные сайты используют обычный DNS вашей сети.',
+                tr('Через него узнаются адреса только включённых сервисов. '
+                'Остальные сайты используют обычный DNS вашей сети.'),
                 style: tx(12, c: C.muted, h: 1.45),
               ),
               const SizedBox(height: 8),
-              const SectionTitle('Списки сервисов'),
+              SectionTitle(tr('Списки сервисов')),
               const SizedBox(height: 8),
               CvCard(
                 padding: const EdgeInsets.fromLTRB(14, 4, 2, 4),
@@ -281,8 +302,8 @@ class _SettingsTabState extends State<SettingsTab> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Сервисов: ${state.builtin.length} · '
-                                  'доменов: ${state.builtinDomainCount}',
+                                  tr('Сервисов: {0} · '
+                                  'доменов: {1}', [state.builtin.length, state.builtinDomainCount]),
                                   style: tx(14, w: w600, c: C.white),
                                 ),
                                 const SizedBox(height: 2),
@@ -301,7 +322,7 @@ class _SettingsTabState extends State<SettingsTab> {
                           SizedBox(
                             width: 116,
                             child: CvButton(
-                              label: state.updatingLists ? 'Идёт…' : 'Обновить',
+                              label: state.updatingLists ? tr('Идёт…') : tr('Обновить'),
                               height: 44,
                               onTap: state.updatingLists ? null : _updateLists,
                             ),
@@ -310,8 +331,8 @@ class _SettingsTabState extends State<SettingsTab> {
                       ),
                     ),
                     _SwitchRow(
-                      title: 'Обновлять автоматически',
-                      note: 'Раз в неделю, при запуске приложения',
+                      title: tr('Обновлять автоматически'),
+                      note: tr('Раз в неделю, при запуске приложения'),
                       value: settings.autoUpdateLists,
                       last: true,
                       onChanged: (value) => state.changeSettings(
@@ -323,26 +344,35 @@ class _SettingsTabState extends State<SettingsTab> {
                 ),
               ),
               const SizedBox(height: 8),
-              const SectionTitle('Перенос и сброс'),
+              SectionTitle(tr('Перенос и сброс')),
               const SizedBox(height: 8),
               CvCard(
                 padding: const EdgeInsets.all(6),
                 child: Column(
                   children: [
-                    _ActionLine(
-                      title: 'Сохранить настройки в файл',
-                      note: 'Серверы, свои маршруты и порядок групп. В файле '
-                          'есть ключи серверов — храните его как пароль',
+                    ActionLine(
+                      title: tr('Сохранить настройки в файл'),
+                      note: tr('Серверы, разделы и ресурсы со всеми правками. В '
+                          'файле есть ключи серверов — храните его как пароль'),
                       onTap: _export,
                     ),
-                    _ActionLine(
-                      title: 'Загрузить настройки из файла',
-                      note: 'Текущие настройки будут заменены',
+                    ActionLine(
+                      title: tr('Загрузить настройки из файла'),
+                      note: tr('Текущие настройки будут заменены'),
                       onTap: _import,
                     ),
-                    _ActionLine(
-                      title: 'Сбросить все настройки',
-                      note: 'Вернуть приложение к начальному состоянию',
+                    ActionLine(
+                      title: tr('Восстановить стандартные разделы'),
+                      note: tr('Вернуть удалённые разделы и ресурсы. Ваши правки '
+                          'и свои ресурсы останутся'),
+                      onTap: () {
+                        state.restoreDefaults();
+                        showNote(context, tr('Стандартные разделы возвращены'));
+                      },
+                    ),
+                    ActionLine(
+                      title: tr('Сбросить все настройки'),
+                      note: tr('Вернуть приложение к начальному состоянию'),
                       danger: true,
                       onTap: () => setState(() => _confirmReset = true),
                     ),
@@ -354,30 +384,30 @@ class _SettingsTabState extends State<SettingsTab> {
                 child: Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: DangerConfirm(
-                    question: 'Сбросить все настройки?',
-                    note: 'Удалятся серверы, свои маршруты и порядок групп. '
-                        'Сами серверы останутся настроенными — их можно будет '
-                        'добавить снова.',
-                    cancelLabel: 'Не сбрасывать',
-                    confirmLabel: 'Сбросить',
+                    question: tr('Сбросить все настройки?'),
+                    note: tr('Удалятся серверы, свои разделы и ресурсы, правки в '
+                        'списках. Сами серверы останутся настроенными — их можно будет '
+                        'добавить снова.'),
+                    cancelLabel: tr('Не сбрасывать'),
+                    confirmLabel: tr('Сбросить'),
                     onCancel: () => setState(() => _confirmReset = false),
                     onConfirm: _reset,
                   ),
                 ),
               ),
               const SizedBox(height: 8),
-              const SectionTitle('О программе'),
+              SectionTitle(tr('О программе')),
               const SizedBox(height: 8),
               CvCard(
                 child: Column(
                   children: [
                     const _InfoRow(label: 'ColdVPN', value: appVersion),
                     const SizedBox(height: 6),
-                    const _InfoRow(label: 'Клиент AmneziaWG', value: '2.0.1'),
+                    _InfoRow(label: tr('Клиент AmneziaWG'), value: '2.0.1'),
                     const SizedBox(height: 2),
                     Row(
                       children: [
-                        Text('Исходный код', style: tx(14, c: C.soft)),
+                        Text(tr('Исходный код'), style: tx(14, c: C.soft)),
                         const Spacer(),
                         CvLink(
                           label: 'github.com/ColdVision/ColdVPN',
@@ -438,51 +468,6 @@ class _SwitchRow extends StatelessWidget {
           ),
           CvSwitch(value: value, label: title, onChanged: onChanged),
         ],
-      ),
-    );
-  }
-}
-
-class _ActionLine extends StatelessWidget {
-  const _ActionLine({
-    required this.title,
-    required this.note,
-    required this.onTap,
-    this.danger = false,
-  });
-
-  final String title;
-  final String note;
-  final VoidCallback onTap;
-  final bool danger;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = danger ? C.dangerText : C.white;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(13),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 56),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(title, style: tx(14, w: w600, c: color)),
-                    const SizedBox(height: 2),
-                    Text(note, style: tx(12, c: C.muted, h: 1.4)),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, size: 18, color: color),
-            ],
-          ),
-        ),
       ),
     );
   }

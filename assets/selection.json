@@ -179,16 +179,6 @@
    ]
   },
   {
-   "name": "RuTracker",
-   "from": [
-    "Global/Rutracker",
-    "RU-RU/rutracker.org.bat"
-   ],
-   "v2fly": [
-    "rutracker"
-   ]
-  },
-  {
    "name": "Anilibria + AnimeGo",
    "from": [
     "Global/anilibria",
@@ -208,6 +198,98 @@
    "domains": [
     "2ip.ru",
     "2ip.io"
+   ]
+  },
+  {
+   "name": "Copilot",
+   "from": [
+    "Global/copilot"
+   ],
+   "domains": [
+    "copilot.microsoft.com",
+    "copilot.com",
+    "copilot.cloud.microsoft"
+   ]
+  },
+  {
+   "name": "Snapchat",
+   "from": [
+    "Global/snapchat"
+   ],
+   "v2fly": [
+    "snap"
+   ]
+  },
+  {
+   "name": "Netflix",
+   "from": [
+    "Global/Netflix"
+   ],
+   "v2fly": [
+    "netflix"
+   ]
+  },
+  {
+   "name": "Twitch",
+   "from": [
+    "Global/twitch"
+   ],
+   "v2fly": [
+    "twitch"
+   ]
+  },
+  {
+   "name": "Blizzard",
+   "from": [
+    "Global/blizzard"
+   ],
+   "v2fly": [
+    "activision-blizzard"
+   ]
+  },
+  {
+   "name": "Epic Games",
+   "from": [
+    "Global/Epic Games"
+   ],
+   "v2fly": [
+    "epicgames"
+   ]
+  },
+  {
+   "name": "Steam",
+   "from": [
+    "Global/Steam"
+   ],
+   "v2fly": [
+    "steam"
+   ]
+  },
+  {
+   "name": "Bethesda",
+   "from": [
+    "Global/bethesda.net"
+   ],
+   "v2fly": [
+    "bethesda"
+   ]
+  },
+  {
+   "name": "Figma",
+   "from": [
+    "Global/figma"
+   ],
+   "v2fly": [
+    "figma"
+   ]
+  },
+  {
+   "name": "Miro",
+   "from": [
+    "Global/miro"
+   ],
+   "domains": [
+    "miro.com"
    ]
   }
  ],

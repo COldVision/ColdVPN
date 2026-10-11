@@ -1,3 +1,5 @@
+import 'l10n.dart';
+
 /// Сервис из списка: один переключатель в интерфейсе.
 class ServiceEntry {
   const ServiceEntry({
@@ -20,6 +22,12 @@ class ServiceEntry {
 
   /// Подстроки: имя с такой подстрокой тоже относится к сервису.
   final List<String> keywords;
+
+  /// Строки для поля ввода при правке: домены, затем адреса.
+  String get text => [
+        ...domains,
+        for (final ip in ips) ip.endsWith('/32') ? ip.split('/').first : ip,
+      ].join('\n');
 
   factory ServiceEntry.fromJson(Map<String, dynamic> json) {
     return ServiceEntry(
@@ -150,7 +158,7 @@ class SavedServer {
   factory SavedServer.fromJson(Map<String, dynamic> json) {
     return SavedServer(
       id: json['id'] as String,
-      name: json['name'] as String? ?? 'Сервер',
+      name: json['name'] as String? ?? tr('Сервер'),
       profile: ServerProfile.fromJson(json['profile'] as Map<String, dynamic>),
       country: json['country'] as String? ?? '',
       city: json['city'] as String? ?? '',
@@ -159,41 +167,93 @@ class SavedServer {
   }
 }
 
-/// Маршрут, который пользователь добавил сам: набор доменов и адресов.
-class CustomRoute {
-  const CustomRoute({
+/// Раздел на вкладке «Сервисы».
+class Section {
+  Section({required this.id, required this.name, required this.icon});
+
+  final String id;
+  String name;
+
+  /// Ключ значка из `sectionIcons`.
+  String icon;
+
+  /// Название для показа: стандартные разделы переводятся, свои — как есть.
+  String get title => tr(name);
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'icon': icon};
+
+  factory Section.fromJson(Map<String, dynamic> json) => Section(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? tr('Раздел'),
+        icon: json['icon'] as String? ?? 'star',
+      );
+}
+
+/// Ресурс: строка с переключателем на вкладке «Сервисы».
+///
+/// У ресурса, пришедшего из каталога ([id] совпадает с сервисом каталога),
+/// здесь хранятся только правки пользователя: что он дописал и что убрал.
+/// Сам список берётся из каталога, поэтому продолжает обновляться.
+class Resource {
+  Resource({
     required this.id,
     required this.name,
-    required this.domains,
-    required this.ips,
+    required this.section,
+    this.domains = const [],
+    this.ips = const [],
+    this.removed = const [],
   });
 
-  /// Начинается с `custom-`, чтобы не совпасть со встроенными сервисами.
   final String id;
-  final String name;
-  final List<String> domains;
+  String name;
 
-  /// Адреса и диапазоны в виде CIDR.
+  /// Идентификатор раздела, в котором показан ресурс.
+  String section;
+
+  /// Свои домены и адреса (CIDR). У ресурса из каталога — добавленные
+  /// к его списку.
+  final List<String> domains;
   final List<String> ips;
 
-  /// Строки для поля ввода при правке маршрута.
-  String get text => [
-        ...domains,
-        for (final ip in ips) ip.endsWith('/32') ? ip.split('/').first : ip,
-      ].join('\n');
+  /// Домены и адреса каталога, которые пользователь убрал.
+  final List<String> removed;
 
-  ServiceEntry toService() =>
-      ServiceEntry(id: id, name: name, ips: ips, domains: domains);
+  /// Итоговый список: каталог ([base]) с правками пользователя.
+  ServiceEntry toService(ServiceEntry? base) {
+    if (base == null) {
+      return ServiceEntry(id: id, name: name, ips: ips, domains: domains);
+    }
+    final gone = removed.toSet();
+    return ServiceEntry(
+      id: id,
+      name: name,
+      ips: {...base.ips.where((v) => !gone.contains(v)), ...ips}.toList(),
+      domains: {...base.domains.where((v) => !gone.contains(v)), ...domains}
+          .toList(),
+      keywords: base.keywords,
+    );
+  }
 
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'name': name, 'domains': domains, 'ips': ips};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'section': section,
+        'domains': domains,
+        'ips': ips,
+        'removed': removed,
+      };
 
-  factory CustomRoute.fromJson(Map<String, dynamic> json) {
-    return CustomRoute(
+  /// Читает и запись прежних сборок о «своём маршруте» (без раздела).
+  factory Resource.fromJson(Map<String, dynamic> json) {
+    List<String> list(String key) =>
+        (json[key] as List<dynamic>? ?? const []).cast<String>();
+    return Resource(
       id: json['id'] as String,
-      name: json['name'] as String? ?? 'Маршрут',
-      domains: (json['domains'] as List<dynamic>? ?? const []).cast<String>(),
-      ips: (json['ips'] as List<dynamic>? ?? const []).cast<String>(),
+      name: json['name'] as String? ?? tr('Ресурс'),
+      section: json['section'] as String? ?? '',
+      domains: list('domains'),
+      ips: list('ips'),
+      removed: list('removed'),
     );
   }
 }
@@ -207,7 +267,9 @@ class AppSettings {
     this.ipv4Only = true,
     this.dns = '1.0.0.1',
     this.fullTunnel = false,
+    this.appMode = false,
     this.closeToTray = true,
+    this.language = '',
     this.autoUpdateLists = true,
   });
 
@@ -229,8 +291,15 @@ class AppSettings {
   /// Через VPN идёт весь трафик, а не только включённые сервисы.
   bool fullTunnel;
 
+  /// Только на Android: через VPN идут выбранные приложения целиком, а не
+  /// сервисы по спискам адресов.
+  bool appMode;
+
   /// При закрытии окна прятать приложение в трей, а не выходить.
   bool closeToTray;
+
+  /// Язык интерфейса: `ru`, `en` или пусто — как в системе.
+  String language;
 
   /// Раз в неделю обновлять списки сервисов из репозиториев.
   bool autoUpdateLists;
@@ -242,7 +311,9 @@ class AppSettings {
         'ipv4Only': ipv4Only,
         'dns': dns,
         'fullTunnel': fullTunnel,
+        'appMode': appMode,
         'closeToTray': closeToTray,
+        'language': language,
         'autoUpdateLists': autoUpdateLists,
       };
 
@@ -254,7 +325,9 @@ class AppSettings {
       ipv4Only: json['ipv4Only'] as bool? ?? true,
       dns: json['dns'] as String? ?? '1.0.0.1',
       fullTunnel: json['fullTunnel'] as bool? ?? false,
+      appMode: json['appMode'] as bool? ?? false,
       closeToTray: json['closeToTray'] as bool? ?? true,
+      language: json['language'] as String? ?? '',
       autoUpdateLists: json['autoUpdateLists'] as bool? ?? true,
     );
   }
@@ -279,5 +352,5 @@ class CheckStep {
 
   final String title;
   CheckState state = CheckState.wait;
-  String note = 'в очереди';
+  String note = tr('в очереди');
 }

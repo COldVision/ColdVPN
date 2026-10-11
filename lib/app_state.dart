@@ -3,9 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show PlatformException, rootBundle;
 import 'package:path_provider/path_provider.dart';
 
+import 'android_tunnel.dart';
 import 'awg_config.dart';
 import 'awg_manager.dart';
 import 'catalog.dart';
@@ -15,6 +16,7 @@ import 'models.dart';
 import 'route_input.dart';
 import 'secret_store.dart';
 import 'server_installer.dart';
+import 'l10n.dart';
 
 enum VpnStatus { off, connecting, on }
 
@@ -30,7 +32,8 @@ class AppState extends ChangeNotifier {
     Directory tunnelDir,
   ) {
     _tunnel = AwgManager(tunnelDir, onLog: addLog);
-    _rebuildServices();
+    // Начальный набор разделов; сохранённые настройки читаются следом.
+    _apply(const {});
   }
 
   final File _stateFile;
@@ -63,19 +66,23 @@ class AppState extends ChangeNotifier {
   /// Сколько адресов сейчас направлено в туннель по доменам.
   int get domainRouteCount => _routed.length;
 
-  /// Сервисы из встроенного списка.
+  /// Каталог: списки сервисов, которые обновляются из репозиториев.
   final List<ServiceEntry> builtin;
 
-  /// Маршруты, добавленные пользователем.
-  final List<CustomRoute> customRoutes = [];
+  /// Разделы вкладки «Сервисы» в порядке показа.
+  final List<Section> sections = [];
 
-  /// Встроенные сервисы и свои маршруты вместе.
+  /// Ресурсы всех разделов. Порядок в разделе — порядок в этом списке.
+  final List<Resource> resources = [];
+
+  /// Сервисы каталога, которые пользователь удалил: обновление списков
+  /// не должно возвращать их обратно.
+  final Set<String> deleted = {};
+
+  /// Ресурсы с итоговыми списками адресов, в порядке [resources].
   List<ServiceEntry> services = const [];
 
   final Set<String> enabled = {};
-
-  /// Порядок групп на вкладке «Сервисы».
-  List<String> groupOrder = [for (final g in serviceGroups) g.id];
 
   final List<SavedServer> servers = [];
   String? selectedServerId;
@@ -147,7 +154,7 @@ class AppState extends ChangeNotifier {
           if (!_memoryOnly.contains(entry.key)) entry.key: entry.value,
       });
     } catch (e) {
-      addLog('Не удалось сохранить пароль сервера: $e');
+      addLog(tr('Не удалось сохранить пароль сервера: {0}', [e]));
     }
   }
 
@@ -158,7 +165,59 @@ class AppState extends ChangeNotifier {
   String checkAdvice = '';
 
   /// Подключение пока реализовано только для Windows.
-  bool get platformSupported => Platform.isWindows;
+  bool get platformSupported => Platform.isWindows || Platform.isAndroid;
+
+  bool get isAndroid => Platform.isAndroid;
+
+  /// Только на Android: приложения телефона и те из них, что идут через VPN.
+  List<AndroidApp> apps = const [];
+  final Set<String> enabledApps = {};
+  bool loadingApps = false;
+
+  /// Режим «по приложениям» действует только на Android.
+  bool get appMode => Platform.isAndroid && settings.appMode;
+
+  Future<void> loadApps() async {
+    if (!Platform.isAndroid || loadingApps) return;
+    loadingApps = true;
+    notifyListeners();
+    try {
+      apps = await AndroidTunnel.apps();
+    } catch (e) {
+      addLog(tr('Не удалось получить список приложений: {0}', [e]));
+    } finally {
+      loadingApps = false;
+      notifyListeners();
+    }
+  }
+
+  void toggleApp(String package, bool on) {
+    on ? enabledApps.add(package) : enabledApps.remove(package);
+    notifyListeners();
+    unawaited(_save());
+    if (status == VpnStatus.off || !appMode || settings.fullTunnel) return;
+    _restartTimer?.cancel();
+    _restartTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (canConnect) {
+        connect();
+      } else {
+        disconnect();
+      }
+    });
+  }
+
+  Future<TunnelStats?> _tunnelStats() =>
+      Platform.isAndroid ? AndroidTunnel.stats() : _tunnel.stats();
+
+  Future<void> _tunnelStop() async {
+    if (Platform.isAndroid) {
+      try {
+        await AndroidTunnel.stop();
+      } catch (_) {}
+    } else {
+      await _tunnel.stop();
+    }
+  }
 
   SavedServer? get current {
     for (final s in servers) {
@@ -170,7 +229,9 @@ class AppState extends ChangeNotifier {
   ServerProfile? get server => current?.profile;
 
   /// Есть ли что направлять в туннель.
-  bool get canConnect => settings.fullTunnel || enabled.isNotEmpty;
+  bool get canConnect =>
+      settings.fullTunnel ||
+      (appMode ? enabledApps.isNotEmpty : enabled.isNotEmpty);
 
   int get enabledRangeCount => collectCidrs(services, enabled).length;
 
@@ -208,7 +269,7 @@ class AppState extends ChangeNotifier {
             final newer = byId.remove(services[i].id);
             if (newer != null) services[i] = newer;
           }
-          services.addAll(byId.values);
+          // Остальное в файле — сервисы, которых в этой версии уже нет.
           updatedAt = DateTime.tryParse('${saved['updatedAt']}');
         }
       }
@@ -231,14 +292,20 @@ class AppState extends ChangeNotifier {
     state.elevated = await AwgManager.isElevated();
     // Туннель мог остаться от прошлого запуска, если приложение закрыли
     // аварийно: снимаем его, чтобы состояние на экране было честным.
-    if (state.platformSupported && state.elevated) {
+    if (Platform.isWindows && state.elevated) {
       await state._tunnel.removeLegacyTunnel();
       await state._tunnel.stop();
       // И правила DNS, которые создавала прежняя сборка: без работающего
       // приложения они оставляют имена сервисов без ответа.
       await AwgManager.clearDomainRules();
     }
-    if (state.platformSupported) {
+    if (Platform.isAndroid && await AndroidTunnel.isUp()) {
+      // На Android туннель живёт дольше окна приложения: если он поднят,
+      // показываем это честно.
+      state.status = VpnStatus.on;
+      state._startStats();
+    }
+    if (Platform.isWindows) {
       state.autostart = await _autostartEnabled();
       // Задача автозапуска от прежней сборки запускала приложение с окном —
       // пересоздаём её, чтобы оно стартовало свёрнутым в трей.
@@ -250,7 +317,56 @@ class AppState extends ChangeNotifier {
   }
 
   void _rebuildServices() {
-    services = [...builtin, for (final r in customRoutes) r.toService()];
+    final base = {for (final s in builtin) s.id: s};
+    services = [for (final r in resources) r.toService(base[r.id])];
+  }
+
+  /// Раздел, куда попадает ресурс, оставшийся без своего.
+  String _fallbackSection() {
+    if (sections.isEmpty) {
+      sections.add(Section(id: otherGroupId, name: 'Прочее', icon: 'globe'));
+    }
+    return sections.any((s) => s.id == otherGroupId)
+        ? otherGroupId
+        : sections.last.id;
+  }
+
+  /// Добавляет ресурсы для сервисов каталога, которых ещё нет в разделах
+  /// (первый запуск, новый сервис в каталоге), и пристраивает ресурсы,
+  /// раздел которых пропал.
+  void _addMissing() {
+    bool exists(String id) => sections.any((s) => s.id == id);
+    for (final r in resources) {
+      if (!exists(r.section)) r.section = _fallbackSection();
+    }
+    final have = {for (final r in resources) r.id};
+    final home = {
+      for (final g in serviceGroups)
+        for (final id in g.serviceIds) id: g.id,
+    };
+    final ordered = [
+      for (final id in home.keys) ...builtin.where((s) => s.id == id),
+      ...builtin.where((s) => !home.containsKey(s.id)),
+    ];
+    // Раздел, появившийся в новой версии приложения (ни одного его ресурса
+    // у пользователя ещё не было), добавляется вместе с ресурсами.
+    for (final g in serviceGroups) {
+      if (exists(g.id) ||
+          g.serviceIds.any((id) => have.contains(id) || deleted.contains(id)) ||
+          !g.serviceIds.any((id) => builtin.any((s) => s.id == id))) {
+        continue;
+      }
+      sections.add(Section(id: g.id, name: g.label, icon: g.icon));
+    }
+    for (final s in ordered) {
+      if (have.contains(s.id) || deleted.contains(s.id)) continue;
+      final section = home[s.id] ?? otherGroupId;
+      resources.add(Resource(
+        id: s.id,
+        name: s.name,
+        section: exists(section) ? section : _fallbackSection(),
+      ));
+    }
   }
 
   Future<void> _read() async {
@@ -260,20 +376,52 @@ class AppState extends ChangeNotifier {
         jsonDecode(await _stateFile.readAsString()) as Map<String, dynamic>,
       );
     } catch (e) {
-      addLog('Не удалось прочитать сохранённые настройки: $e');
+      addLog(tr('Не удалось прочитать сохранённые настройки: {0}', [e]));
+      _apply(const {});
     }
   }
 
   /// Заменяет всё состояние приложения тем, что записано в [json].
   void _apply(Map<String, dynamic> json) {
-    customRoutes.clear();
+    sections.clear();
+    resources.clear();
+    deleted.clear();
     enabled.clear();
+    enabledApps.clear();
     _learned.clear();
     servers.clear();
+    enabledApps.addAll((json['apps'] as List? ?? const []).cast<String>());
 
-    for (final item in json['customRoutes'] as List? ?? const []) {
-      customRoutes.add(CustomRoute.fromJson(item as Map<String, dynamic>));
+    if (json['sections'] is List) {
+      for (final item in json['sections'] as List) {
+        sections.add(Section.fromJson(item as Map<String, dynamic>));
+      }
+      for (final item in json['resources'] as List? ?? const []) {
+        resources.add(Resource.fromJson(item as Map<String, dynamic>));
+      }
+      deleted.addAll((json['deleted'] as List? ?? const []).cast<String>());
+    } else {
+      // Первый запуск или настройки прежней сборки: начальный набор
+      // разделов в сохранённом порядке, свои маршруты — отдельным разделом.
+      for (final item in json['customRoutes'] as List? ?? const []) {
+        resources.add(Resource.fromJson(item as Map<String, dynamic>)
+          ..section = customGroupId);
+      }
+      final groups = [
+        for (final g in serviceGroups)
+          Section(id: g.id, name: g.label, icon: g.icon),
+        if (resources.isNotEmpty)
+          Section(id: customGroupId, name: 'Мои маршруты', icon: 'route'),
+      ];
+      final order = (json['groupOrder'] as List? ?? const []).cast<String>();
+      sections
+        ..addAll([
+          for (final id in order) ...groups.where((g) => g.id == id),
+        ])
+        ..addAll(groups.where((g) => !order.contains(g.id)));
     }
+    resources.removeWhere((r) => retiredServices.contains(r.id));
+    _addMissing();
     _rebuildServices();
 
     final known = {for (final s in services) s.id};
@@ -297,18 +445,11 @@ class AppState extends ChangeNotifier {
         old['clientPrivateKey'] is String) {
       servers.add(SavedServer(
         id: _newId('srv'),
-        name: 'Основной',
+        name: tr('Основной'),
         profile: ServerProfile.fromJson(old),
       ));
     }
     selectedServerId = json['selectedServer'] as String?;
-
-    final order = (json['groupOrder'] as List? ?? const []).cast<String>();
-    final ids = [for (final g in serviceGroups) g.id];
-    groupOrder = [
-      ...order.where(ids.contains),
-      ...ids.where((id) => !order.contains(id)),
-    ];
 
     final saved = json['settings'];
     final s = saved is Map<String, dynamic>
@@ -320,17 +461,23 @@ class AppState extends ChangeNotifier {
       ..domainRouting = s.domainRouting
       ..ipv4Only = s.ipv4Only
       ..fullTunnel = s.fullTunnel
+      ..appMode = s.appMode
       ..closeToTray = s.closeToTray
+      ..language = s.language
       ..autoUpdateLists = s.autoUpdateLists
       ..dns = s.dns;
+    // Пустое значение — язык ещё не выбирали: берётся язык системы.
+    appLang = settings.language.isEmpty ? systemLang() : settings.language;
   }
 
   Map<String, dynamic> _snapshot({bool withLearned = true}) => {
         'enabled': enabled.toList(),
         'servers': [for (final s in servers) s.toJson()],
         'selectedServer': selectedServerId,
-        'customRoutes': [for (final r in customRoutes) r.toJson()],
-        'groupOrder': groupOrder,
+        'sections': [for (final s in sections) s.toJson()],
+        'resources': [for (final r in resources) r.toJson()],
+        'deleted': deleted.toList(),
+        'apps': enabledApps.toList(),
         'settings': settings.toJson(),
         if (withLearned) 'learned': _learned,
       };
@@ -340,7 +487,7 @@ class AppState extends ChangeNotifier {
       await _stateFile.parent.create(recursive: true);
       await _stateFile.writeAsString(jsonEncode(_snapshot()));
     } catch (e) {
-      debugPrint('Не удалось сохранить настройки: $e');
+      debugPrint(tr('Не удалось сохранить настройки: {0}', [e]));
     }
   }
 
@@ -360,12 +507,12 @@ class AppState extends ChangeNotifier {
     try {
       json = jsonDecode(text);
     } catch (_) {
-      return 'Это не файл настроек ColdVPN.';
+      return tr('Это не файл настроек ColdVPN.');
     }
     if (json is! Map<String, dynamic> ||
         json['app'] != 'ColdVPN' ||
         json['servers'] is! List) {
-      return 'Это не файл настроек ColdVPN.';
+      return tr('Это не файл настроек ColdVPN.');
     }
     if (status != VpnStatus.off) await disconnect();
     final backup = _snapshot();
@@ -375,12 +522,12 @@ class AppState extends ChangeNotifier {
       // Файл оказался испорчен на середине — возвращаем то, что было.
       _apply(backup);
       notifyListeners();
-      return 'Файл настроек повреждён: $e';
+      return tr('Файл настроек повреждён: {0}', [e]);
     }
     settings.wasOn = false;
     await _save();
-    addLog('Настройки загружены из файла: серверов ${servers.length}, своих '
-        'маршрутов ${customRoutes.length}.');
+    addLog(tr('Настройки загружены из файла: серверов {0}, '
+        'разделов {1}, ресурсов {2}.', [servers.length, sections.length, resources.length]));
     return null;
   }
 
@@ -393,7 +540,7 @@ class AppState extends ChangeNotifier {
     _memoryOnly.clear();
     await _saveSecrets();
     await _save();
-    addLog('Настройки сброшены.');
+    addLog(tr('Настройки сброшены.'));
   }
 
   // ------------------------------------------------------ списки сервисов
@@ -402,7 +549,7 @@ class AppState extends ChangeNotifier {
   /// ничего не скачалось, остаётся с прежним списком.
   /// Возвращает короткий итог для показа пользователю.
   Future<String> updateLists() async {
-    if (updatingLists) return 'Обновление уже идёт';
+    if (updatingLists) return tr('Обновление уже идёт');
     updatingLists = true;
     notifyListeners();
     try {
@@ -411,10 +558,10 @@ class AppState extends ChangeNotifier {
       ) as Map<String, dynamic>;
       final update = await downloadServices(selection);
       for (final problem in update.problems) {
-        addLog('Списки: $problem');
+        addLog(tr('Списки: {0}', [problem]));
       }
       if (update.services.isEmpty) {
-        throw 'из репозиториев не удалось собрать ни одного сервиса';
+        throw tr('из репозиториев не удалось собрать ни одного сервиса');
       }
       final fresh = {for (final s in update.services) s.id: s};
       var changed = 0;
@@ -440,18 +587,23 @@ class AppState extends ChangeNotifier {
         'updatedAt': listsUpdatedAt!.toIso8601String(),
         'services': [for (final s in builtin) s.toJson()],
       }));
+      _addMissing();
       _rebuildServices();
+      unawaited(_save());
       final summary = changed == 0
-          ? 'Списки актуальны, изменений нет'
-          : 'Списки обновлены, изменилось сервисов: $changed';
+          ? tr('Списки актуальны, изменений нет')
+          : tr('Списки обновлены, изменилось сервисов: {0}', [changed]);
       addLog('$summary.');
-      if (changed > 0 && status != VpnStatus.off && !settings.fullTunnel) {
+      if (changed > 0 &&
+          status != VpnStatus.off &&
+          !settings.fullTunnel &&
+          !appMode) {
         unawaited(connect());
       }
       return summary;
     } catch (e) {
-      addLog('Не удалось обновить списки сервисов: $e');
-      return 'Не удалось обновить списки. Подробности в журнале';
+      addLog(tr('Не удалось обновить списки сервисов: {0}', [e]));
+      return tr('Не удалось обновить списки. Подробности в журнале');
     } finally {
       updatingLists = false;
       notifyListeners();
@@ -482,16 +634,25 @@ class AppState extends ChangeNotifier {
 
   static LogKind _kindOf(String line) {
     final low = line.toLowerCase();
-    if (line.startsWith('По домену')) return LogKind.route;
+    // Записи журнала бывают на обоих языках, признаки — тоже.
+    if (line.startsWith('По домену') || line.startsWith('By domain')) {
+      return LogKind.route;
+    }
     const bad = [
       'не удалось', 'ошибка', 'внимание', 'не прошл', 'не ответил', //
       'недоступн', 'не пройдена', 'не разрешилось', 'прервалась',
+      'could not', 'error', 'warning', 'failed', 'did not respond', //
+      'unavailable', 'not passed', 'interrupted',
     ];
     if (bad.any(low.contains)) return LogKind.warn;
     if (line.startsWith('Подключено') ||
         line.startsWith('Рукопожатие') ||
         low.contains('пройдена') ||
-        low.contains('настроен')) {
+        low.contains('настроен') ||
+        line.startsWith('Connected') ||
+        line.startsWith('Handshake') ||
+        low.contains('passed') ||
+        low.contains('configured')) {
       return LogKind.ok;
     }
     return LogKind.info;
@@ -512,7 +673,7 @@ class AppState extends ChangeNotifier {
   void _addBlock(String title, List<String> lines) {
     events.add('--- $title ---');
     events.addAll(lines);
-    events.add('--- конец: $title ---');
+    events.add(tr('--- конец: {0} ---', [title]));
     _trim();
     notifyListeners();
   }
@@ -529,7 +690,7 @@ class AppState extends ChangeNotifier {
     final entry = SavedServer(
       id: _newId('srv'),
       name: (name == null || name.trim().isEmpty)
-          ? (servers.isEmpty ? 'Основной' : 'Сервер ${servers.length + 1}')
+          ? (servers.isEmpty ? tr('Основной') : tr('Сервер {0}', [servers.length + 1]))
           : name.trim(),
       profile: profile,
     );
@@ -629,7 +790,7 @@ class AppState extends ChangeNotifier {
   /// устройством.
   Future<String> issueDeviceConf(SavedServer entry) async {
     final creds = credentials[entry.profile.host];
-    if (creds == null) throw 'Нет данных для входа на сервер.';
+    if (creds == null) throw tr('Нет данных для входа на сервер.');
     final device =
         'shared-${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
     final profile = await installServer(
@@ -644,8 +805,8 @@ class AppState extends ChangeNotifier {
       ),
       (_) {},
     );
-    addLog('На сервере ${entry.profile.host} выпущен отдельный ключ '
-        '«$device» для другого устройства.');
+    addLog(tr('На сервере {0} выпущен отдельный ключ '
+        '«{1}» для другого устройства.', [entry.profile.host, device]));
     return _shareConf(profile);
   }
 
@@ -660,7 +821,7 @@ class AppState extends ChangeNotifier {
     try {
       final request = await http.getUrl(Uri.parse(
         'http://ip-api.com/json/$host?fields=status,country,countryCode,city'
-        '&lang=ru',
+        '&lang=$appLang',
       ));
       final response = await request.close().timeout(const Duration(seconds: 6));
       final body = await response
@@ -697,70 +858,182 @@ class AppState extends ChangeNotifier {
     _afterSelectionChange();
   }
 
-  /// Сервисы группы в том порядке, в каком они показаны.
-  List<ServiceEntry> servicesOf(String groupId) {
-    if (groupId == customGroupId) {
-      return [for (final r in customRoutes) r.toService()];
-    }
-    final grouped = {
-      for (final g in serviceGroups)
-        if (g.id != otherGroupId) ...g.serviceIds,
+  /// Ресурсы раздела в том порядке, в каком они показаны.
+  List<ServiceEntry> servicesOf(String sectionId) {
+    final ids = {
+      for (final r in resources)
+        if (r.section == sectionId) r.id,
     };
-    final group = serviceGroups.firstWhere((g) => g.id == groupId);
     return [
-      for (final id in group.serviceIds)
-        ...builtin.where((s) => s.id == id),
-      if (groupId == otherGroupId)
-        ...builtin.where(
-          (s) => !grouped.contains(s.id) && !group.serviceIds.contains(s.id),
-        ),
+      for (final s in services)
+        if (ids.contains(s.id)) s,
     ];
+  }
+
+  /// Раздел, в котором лежит ресурс.
+  Section? sectionOf(String resourceId) {
+    for (final r in resources) {
+      if (r.id != resourceId) continue;
+      for (final s in sections) {
+        if (s.id == r.section) return s;
+      }
+    }
+    return null;
   }
 
   void moveGroup(int oldIndex, int newIndex) {
     if (newIndex > oldIndex) newIndex--;
-    final id = groupOrder.removeAt(oldIndex);
-    groupOrder.insert(newIndex.clamp(0, groupOrder.length).toInt(), id);
+    final section = sections.removeAt(oldIndex);
+    sections.insert(newIndex.clamp(0, sections.length).toInt(), section);
     notifyListeners();
     unawaited(_save());
   }
 
-  /// Сохраняет свой маршрут: новый ([id] == null) или изменённый.
-  void saveCustomRoute({
+  /// Создаёт раздел ([id] == null) или меняет его название и значок.
+  /// Возвращает идентификатор раздела.
+  String saveSection({String? id, required String name, required String icon}) {
+    final title = name.trim().isEmpty ? tr('Новый раздел') : name.trim();
+    var sid = id;
+    if (sid == null) {
+      sid = _newId('sec');
+      sections.add(Section(id: sid, name: title, icon: icon));
+    } else {
+      for (final s in sections) {
+        if (s.id != sid) continue;
+        // Стандартное название показано в переводе: если его не меняли,
+        // оно остаётся исходным и продолжает переводиться.
+        if (title != s.title) s.name = title;
+        s.icon = icon;
+      }
+    }
+    notifyListeners();
+    unawaited(_save());
+    return sid;
+  }
+
+  /// Удаляет раздел. Его ресурсы переезжают в [moveTo], а если он не
+  /// задан — удаляются вместе с разделом.
+  void deleteSection(String id, {String? moveTo}) {
+    for (final r in resources.where((r) => r.section == id).toList()) {
+      if (moveTo != null) {
+        r.section = moveTo;
+      } else {
+        _forget(r);
+      }
+    }
+    sections.removeWhere((s) => s.id == id);
+    _rebuildServices();
+    _afterSelectionChange();
+  }
+
+  /// Перетаскивание: ставит ресурс в раздел [sectionId] перед ресурсом
+  /// [before], а если он не задан — в конец раздела.
+  void placeResource(String id, String sectionId, {String? before}) {
+    if (id == before) return;
+    final from = resources.indexWhere((r) => r.id == id);
+    if (from < 0 || !sections.any((s) => s.id == sectionId)) return;
+    final resource = resources.removeAt(from)..section = sectionId;
+    final at =
+        before == null ? -1 : resources.indexWhere((r) => r.id == before);
+    // Порядок в разделе — порядок в общем списке, поэтому «в конец
+    // раздела» значит в конец списка.
+    if (at < 0) {
+      resources.add(resource);
+    } else {
+      resources.insert(at, resource);
+    }
+    _rebuildServices();
+    notifyListeners();
+    unawaited(_save());
+  }
+
+  /// Сохраняет ресурс: новый ([id] == null) или изменённый. [lines] — весь
+  /// его список так, как он остался в поле ввода.
+  void saveResource({
     String? id,
     required String name,
+    required String section,
     required List<RouteLine> lines,
     bool enable = false,
   }) {
-    final route = CustomRoute(
-      id: id ?? _newId('custom'),
+    final rid = id ?? _newId('custom');
+    var domains = [
+      for (final l in lines)
+        if (l.kind == RouteLineKind.domain) l.value,
+    ];
+    var ips = [
+      for (final l in lines)
+        if (l.kind == RouteLineKind.network)
+          l.value
+        else if (l.kind == RouteLineKind.address)
+          '${l.value}/32',
+    ];
+    var removed = const <String>[];
+    // У ресурса из каталога запоминаем только отличия от каталога: тогда
+    // обновление списков не затирает правки и не теряется само.
+    final at = builtin.indexWhere((s) => s.id == rid);
+    if (at >= 0) {
+      final base = {...builtin[at].domains, ...builtin[at].ips};
+      final kept = {...domains, ...ips};
+      removed = [
+        for (final v in base)
+          if (!kept.contains(v)) v,
+      ];
+      domains = [
+        for (final v in domains)
+          if (!base.contains(v)) v,
+      ];
+      ips = [
+        for (final v in ips)
+          if (!base.contains(v)) v,
+      ];
+    }
+    final resource = Resource(
+      id: rid,
       name: name.trim(),
-      domains: [
-        for (final l in lines)
-          if (l.kind == RouteLineKind.domain) l.value,
-      ],
-      ips: [
-        for (final l in lines)
-          if (l.kind == RouteLineKind.network)
-            l.value
-          else if (l.kind == RouteLineKind.address)
-            '${l.value}/32',
-      ],
+      section: section,
+      domains: domains,
+      ips: ips,
+      removed: removed,
     );
-    final index = customRoutes.indexWhere((r) => r.id == route.id);
+    final index = resources.indexWhere((r) => r.id == rid);
     if (index < 0) {
-      customRoutes.add(route);
-      if (enable) enabled.add(route.id);
+      resources.add(resource);
+      if (enable) enabled.add(rid);
+    } else if (resources[index].section == section) {
+      resources[index] = resource;
     } else {
-      customRoutes[index] = route;
+      resources
+        ..removeAt(index)
+        ..add(resource);
     }
     _rebuildServices();
     _afterSelectionChange();
   }
 
-  void deleteCustomRoute(String id) {
-    customRoutes.removeWhere((r) => r.id == id);
-    enabled.remove(id);
+  void deleteResource(String id) {
+    for (final r in resources.where((r) => r.id == id).toList()) {
+      _forget(r);
+    }
+    _rebuildServices();
+    _afterSelectionChange();
+  }
+
+  void _forget(Resource r) {
+    resources.remove(r);
+    enabled.remove(r.id);
+    if (builtin.any((s) => s.id == r.id)) deleted.add(r.id);
+  }
+
+  /// Возвращает удалённые разделы и ресурсы начального набора. То, что
+  /// пользователь создал или изменил сам, остаётся как есть.
+  void restoreDefaults() {
+    deleted.clear();
+    for (final g in serviceGroups) {
+      if (sections.any((s) => s.id == g.id)) continue;
+      sections.add(Section(id: g.id, name: g.label, icon: g.icon));
+    }
+    _addMissing();
     _rebuildServices();
     _afterSelectionChange();
   }
@@ -770,7 +1043,7 @@ class AppState extends ChangeNotifier {
     unawaited(_save());
     // Когда через VPN идёт весь трафик, переключатели сервисов на туннель
     // не влияют.
-    if (status == VpnStatus.off || settings.fullTunnel) return;
+    if (status == VpnStatus.off || settings.fullTunnel || appMode) return;
     // Несколько переключений подряд применяются одним переподключением.
     _restartTimer?.cancel();
     _restartTimer = Timer(const Duration(milliseconds: 1200), () {
@@ -785,6 +1058,14 @@ class AppState extends ChangeNotifier {
   // ------------------------------------------------------------- настройки
 
   /// Меняет настройку и, если VPN включён, переподключается с новой.
+  /// Меняет язык интерфейса: `ru` или `en`.
+  void setLanguage(String code) {
+    settings.language = code;
+    appLang = code;
+    notifyListeners();
+    unawaited(_save());
+  }
+
   void changeSettings(void Function(AppSettings s) change,
       {bool reconnect = true}) {
     change(settings);
@@ -847,8 +1128,8 @@ class AppState extends ChangeNotifier {
               ['/Delete', '/TN', _autostartTask, '/F'],
             );
       if (result.exitCode != 0) {
-        addLog('Не удалось изменить автозапуск: '
-            '${'${result.stdout}${result.stderr}'.trim()}');
+        addLog(tr('Не удалось изменить автозапуск: '
+            '{0}', ['${result.stdout}${result.stderr}'.trim()]));
       } else if (on) {
         // По умолчанию планировщик не запускает задачу от батареи,
         // останавливает её при отключении от сети и через трое суток.
@@ -863,7 +1144,7 @@ class AppState extends ChangeNotifier {
         ]).timeout(const Duration(seconds: 30));
       }
     } catch (e) {
-      addLog('Не удалось изменить автозапуск: $e');
+      addLog(tr('Не удалось изменить автозапуск: {0}', [e]));
     }
     autostart = await _autostartEnabled();
     notifyListeners();
@@ -871,7 +1152,8 @@ class AppState extends ChangeNotifier {
 
   /// Вызывается один раз после запуска приложения.
   void autoConnect() {
-    if (settings.connectOnStart &&
+    if (status == VpnStatus.off &&
+        settings.connectOnStart &&
         settings.wasOn &&
         server != null &&
         canConnect &&
@@ -889,22 +1171,25 @@ class AppState extends ChangeNotifier {
   Future<void> connect() async {
     final profile = server;
     if (profile == null) {
-      _fail('Сначала добавьте сервер на вкладке «Сервер».');
+      _fail(tr('Сначала добавьте сервер на вкладке «Сервер».'));
       return;
     }
     final full = settings.fullTunnel;
-    if (!full && enabled.isEmpty) {
-      _fail('Включите хотя бы один сервис.');
+    if (!canConnect) {
+      _fail(appMode
+          ? tr('Включите хотя бы одно приложение.')
+          : tr('Включите хотя бы один сервис.'));
       return;
     }
     if (!platformSupported) {
-      _fail('Подключение на этой платформе пока не реализовано.');
+      _fail(tr('Подключение на этой платформе пока не реализовано.'));
       return;
     }
     if (!elevated) {
-      _fail('Запустите приложение от имени администратора.');
+      _fail(tr('Запустите приложение от имени администратора.'));
       return;
     }
+    if (Platform.isAndroid) return _connectAndroid(profile);
 
     final run = ++_run;
     status = VpnStatus.connecting;
@@ -961,11 +1246,11 @@ class AppState extends ChangeNotifier {
           await proxy.start();
           _dns = proxy;
           dnsAddress = DnsProxy.listenAddress;
-          addLog('Маршрутизация по доменам включена, обычный DNS: '
-              '${proxy.directUpstreams.join(', ')}.');
+          addLog(tr('Маршрутизация по доменам включена, обычный DNS: '
+              '{0}.', [proxy.directUpstreams.join(', ')]));
         } catch (e) {
-          addLog('Маршрутизация по доменам недоступна (не удалось занять '
-              '${DnsProxy.listenAddress}:53): $e. Работают только списки IP.');
+          addLog(tr('Маршрутизация по доменам недоступна (не удалось занять '
+              '{0}:53): {1}. Работают только списки IP.', [DnsProxy.listenAddress, e]));
         }
       }
       if (run != _run) {
@@ -975,11 +1260,11 @@ class AppState extends ChangeNotifier {
       }
 
       addLog(full
-          ? 'Поднимаю туннель AmneziaWG к ${profile.host}:${profile.port} '
-              '(весь трафик)…'
-          : 'Поднимаю туннель AmneziaWG к ${profile.host}:${profile.port} '
-              '(диапазонов: ${ranges.length}, адресов по доменам: '
-              '${_routed.length})…');
+          ? tr('Поднимаю туннель AmneziaWG к {0}:{1} '
+              '(весь трафик)…', [profile.host, profile.port])
+          : tr('Поднимаю туннель AmneziaWG к {0}:{1} '
+              '(диапазонов: {2}, адресов по доменам: '
+              '{3})…', [profile.host, profile.port, ranges.length, _routed.length]));
       await _tunnel.start(
         buildClientConf(profile, _activeCidrs, dns: dnsAddress),
       );
@@ -995,14 +1280,14 @@ class AppState extends ChangeNotifier {
       final shaken = await _tunnel.waitForHandshake(const Duration(seconds: 15));
       if (run != _run) return;
       if (!shaken) {
-        _addBlock('журнал клиента AmneziaWG', await _tunnel.clientLog());
+        _addBlock(tr('журнал клиента AmneziaWG'), await _tunnel.clientLog());
         await _stopDomainRouting();
         await _tunnel.stop();
-        _fail('Сервер не ответил на рукопожатие. Проверьте, что UDP-порт '
-            '${profile.port} открыт в файрволе хостинга. Подробности в журнале.');
+        _fail(tr('Сервер не ответил на рукопожатие. Проверьте, что UDP-порт '
+            '{0} открыт в файрволе хостинга. Подробности в журнале.', [profile.port]));
         return;
       }
-      addLog('Рукопожатие с сервером выполнено.');
+      addLog(tr('Рукопожатие с сервером выполнено.'));
       if (full) await _tunnel.preferTunnelDns();
       final dnsProxy = _dns;
       if (dnsProxy != null) {
@@ -1016,8 +1301,8 @@ class AppState extends ChangeNotifier {
             [profile.clientAddress, DnsProxy.listenAddress],
           );
         } else {
-          addLog('DNS-посредник не смог занять ${profile.clientAddress}:53, '
-              'остаётся прежний адрес.');
+          addLog(tr('DNS-посредник не смог занять {0}:53, '
+              'остаётся прежний адрес.', [profile.clientAddress]));
         }
         if (run != _run) return;
         // Клиент AmneziaWG при смене сети заново выставляет маршруты только
@@ -1036,17 +1321,132 @@ class AppState extends ChangeNotifier {
       unawaited(_save());
       _startStats();
       if (address == null) {
-        error = 'Туннель поднят, но проверочный запрос через него не прошёл. '
-            'Сайты могут не открываться — запустите диагностику в журнале.';
+        error = tr('Туннель поднят, но проверочный запрос через него не прошёл. '
+            'Сайты могут не открываться — запустите диагностику в журнале.');
         addLog(error!);
       } else {
-        addLog('Подключено. Сайты видят вас под адресом $address.');
+        addLog(tr('Подключено. Сайты видят вас под адресом {0}.', [address]));
       }
       notifyListeners();
     } catch (e) {
       if (run != _run) return;
       await _stopDomainRouting();
       await _tunnel.stop();
+      _fail('$e');
+    }
+  }
+
+  /// Подключение на Android. Маршруты задаются сразу при создании туннеля:
+  /// либо диапазоны включённых сервисов, либо всё — для выбранных
+  /// приложений или для всего телефона. Маршрутов по доменам здесь нет.
+  Future<void> _connectAndroid(ServerProfile profile) async {
+    final run = ++_run;
+    status = VpnStatus.connecting;
+    error = null;
+    notifyListeners();
+    try {
+      final full = settings.fullTunnel;
+      final byApps = !full && appMode;
+      final tunnelDns = _validDns(settings.dns) ? settings.dns : probeAddress;
+      final ranges = collectCidrs(services, enabled).map(alignCidr).toSet();
+      _routed.clear();
+      if (full || byApps) {
+        // Один маршрут «всё»: тогда Android не выпускает трафик этих
+        // приложений мимо VPN и по IPv6.
+        _staticRanges = CidrSet(const ['0.0.0.0/0']);
+        _activeCidrs = {'0.0.0.0/0'};
+      } else {
+        _staticRanges = CidrSet(ranges);
+        _activeCidrs = {...ranges, '$tunnelDns/32'};
+      }
+
+      if (!await AndroidTunnel.prepare()) {
+        if (run != _run) return;
+        _fail(tr('Разрешите приложению создавать VPN-подключение и попробуйте '
+            'снова.'));
+        return;
+      }
+      if (run != _run) return;
+
+      addLog(full
+          ? tr('Поднимаю туннель AmneziaWG к {0}:{1} '
+              '(весь трафик)…', [profile.host, profile.port])
+          : byApps
+              ? tr('Поднимаю туннель AmneziaWG к {0}:{1} '
+                  '(приложений: {2})…', [profile.host, profile.port, enabledApps.length])
+              : tr('Поднимаю туннель AmneziaWG к {0}:'
+                  '{1} (диапазонов: {2})…', [profile.host, profile.port, ranges.length]));
+      // Удалённое с телефона приложение Android в список не примет.
+      if (byApps && apps.isEmpty) await loadApps();
+      if (run != _run) return;
+      final installed = {for (final a in apps) a.package};
+      final included = [
+        for (final p in enabledApps)
+          if (installed.isEmpty || installed.contains(p)) p,
+      ]..sort();
+      if (byApps && included.isEmpty) {
+        _fail(tr('Выбранные приложения не установлены на этом телефоне.'));
+        return;
+      }
+      await AndroidTunnel.start(buildClientConf(
+        profile,
+        _activeCidrs,
+        dns: tunnelDns,
+        includedApps: byApps ? included : const [],
+        androidOnly: true,
+      ));
+      if (run != _run) {
+        // Отменили во время запуска: туннель не должен остаться в фоне.
+        if (status == VpnStatus.off) await _tunnelStop();
+        return;
+      }
+
+      var shaken = false;
+      final deadline = DateTime.now().add(const Duration(seconds: 15));
+      while (DateTime.now().isBefore(deadline)) {
+        final current = await AndroidTunnel.stats();
+        if (run != _run) return;
+        if (current?.lastHandshake != null) {
+          shaken = true;
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+      }
+      if (run != _run) return;
+      if (!shaken) {
+        await _tunnelStop();
+        _fail(tr('Сервер не ответил на рукопожатие. Проверьте, что сервер '
+            'включён и UDP-порт {0} открыт в файрволе хостинга.', [profile.port]));
+        return;
+      }
+      addLog(tr('Рукопожатие с сервером выполнено.'));
+
+      // В режиме «по приложениям» само ColdVPN идёт мимо туннеля, поэтому
+      // проверочный запрос ничего бы не показал.
+      final address = byApps ? null : await _probe();
+      if (run != _run) return;
+      status = VpnStatus.on;
+      exitAddress = address;
+      settings.wasOn = true;
+      unawaited(_save());
+      _startStats();
+      if (byApps) {
+        addLog(tr('Подключено. Через VPN идут выбранные приложения.'));
+      } else if (address == null) {
+        error = tr('Туннель поднят, но проверочный запрос через него не прошёл. '
+            'Сайты могут не открываться — запустите диагностику в журнале.');
+        addLog(error!);
+      } else {
+        addLog(tr('Подключено. Сайты видят вас под адресом {0}.', [address]));
+      }
+      notifyListeners();
+    } on PlatformException catch (e) {
+      if (run != _run) return;
+      await _tunnelStop();
+      _fail(tr('Не удалось поднять туннель: {0}', [trLoose(e.message ?? e.code)]));
+    } catch (e) {
+      if (run != _run) return;
+      await _tunnelStop();
       _fail('$e');
     }
   }
@@ -1091,9 +1491,9 @@ class AppState extends ChangeNotifier {
       extra.forEach(_learned.remove);
     }
     if (++_routeLogCount <= 150) {
-      addLog('По домену $name в туннель добавлено: ${fresh.join(', ')}');
+      addLog(tr('По домену {0} в туннель добавлено: {1}', [name, fresh.join(', ')]));
     } else if (_routeLogCount == 151) {
-      addLog('Дальше добавления по доменам в журнал не пишутся.');
+      addLog(tr('Дальше добавления по доменам в журнал не пишутся.'));
     }
     unawaited(_save());
     await _enqueueRoutes(profile, fresh);
@@ -1107,7 +1507,7 @@ class AppState extends ChangeNotifier {
       try {
         await _tunnel.routeAddresses(conf, addresses);
       } catch (e) {
-        addLog('Не удалось добавить маршруты: $e');
+        addLog(tr('Не удалось добавить маршруты: {0}', [e]));
       }
     });
   }
@@ -1119,11 +1519,24 @@ class AppState extends ChangeNotifier {
     if (proxy == null) return;
     _dns = null;
     await proxy.stop();
-    addLog('DNS-посредник остановлен: запросов ${proxy.total}, по спискам '
-        'сервисов ${proxy.matched}, без ответа ${proxy.unanswered}, с '
-        'опозданием через туннель ${proxy.tunnelLate}; адресов добавлено '
-        'по доменам: ${_routed.length}.');
+    addLog(tr('DNS-посредник остановлен: запросов {0}, по спискам '
+        'сервисов {1}, без ответа {2}, с '
+        'опозданием через туннель {3}; адресов добавлено '
+        'по доменам: {4}.', [proxy.total, proxy.matched, proxy.unanswered, proxy.tunnelLate, _routed.length]));
   }
+
+  /// HTTP-клиент для проверок связи: проверочный запрос, доступность
+  /// сервисов, замер скорости.
+  ///
+  /// Сертификаты здесь не проверяются. На части компьютеров в хранилище
+  /// Windows нет нужных корневых сертификатов (система подгружает их по мере
+  /// надобности, а Dart этого не умеет), и проверка связи падала с
+  /// CERTIFICATE_VERIFY_FAILED при исправном туннеле. Через этот клиент не
+  /// передаётся ничего секретного, а ответы нужны только чтобы понять,
+  /// проходит ли трафик.
+  static HttpClient _checkClient(Duration timeout) => HttpClient()
+    ..connectionTimeout = timeout
+    ..badCertificateCallback = (certificate, host, port) => true;
 
   /// Один запрос служебной страницы Cloudflare через туннель. Возвращает
   /// адрес, под которым она увидела запрос; при неудаче бросает исключение.
@@ -1136,13 +1549,13 @@ class AppState extends ChangeNotifier {
         .join()
         .timeout(const Duration(seconds: 8));
     final match = RegExp(r'^ip=(.+)$', multiLine: true).firstMatch(body);
-    if (match == null) throw 'неожиданный ответ ${response.statusCode}';
+    if (match == null) throw tr('неожиданный ответ {0}', [response.statusCode]);
     return match.group(1)!.trim();
   }
 
   /// Проверяет туннель после подключения. null — запрос не прошёл.
   Future<String?> _probe() async {
-    final http = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    final http = _checkClient(const Duration(seconds: 8));
     try {
       // Сразу после рукопожатия Windows ещё дописывает маршруты туннеля,
       // и первые запросы могут получить «сеть недоступна». Поэтому даём
@@ -1157,7 +1570,7 @@ class AppState extends ChangeNotifier {
           lastError = e;
         }
       }
-      addLog('Проверка туннеля не прошла за $attempts попыток: $lastError');
+      addLog(tr('Проверка туннеля не прошла за {0} попыток: {1}', [attempts, lastError]));
       return null;
     } finally {
       http.close(force: true);
@@ -1171,8 +1584,22 @@ class AppState extends ChangeNotifier {
     upRate = 0;
     _statsTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (status != VpnStatus.on) return;
-      final stats = await _tunnel.stats();
-      if (stats == null || status != VpnStatus.on) return;
+      final stats = await _tunnelStats();
+      if (stats == null) {
+        // На Android VPN может снять сама система: другой VPN или
+        // выключатель в настройках телефона.
+        if (Platform.isAndroid &&
+            status == VpnStatus.on &&
+            !await AndroidTunnel.isUp() &&
+            status == VpnStatus.on) {
+          settings.wasOn = false;
+          unawaited(_save());
+          _fail(tr('VPN отключён системой.'));
+          notifyListeners();
+        }
+        return;
+      }
+      if (status != VpnStatus.on) return;
       final now = DateTime.now();
       final before = _lastSample;
       if (before != null) {
@@ -1210,7 +1637,7 @@ class AppState extends ChangeNotifier {
     _run++;
     _stopStats();
     await _stopDomainRouting();
-    await _tunnel.stop();
+    await _tunnelStop();
     status = VpnStatus.off;
     exitAddress = null;
     if (remember) {
@@ -1260,7 +1687,7 @@ class AppState extends ChangeNotifier {
     _learned.clear();
     _routed.clear();
     await _save();
-    addLog('Найденные по доменам адреса забыты.');
+    addLog(tr('Найденные по доменам адреса забыты.'));
     if (status != VpnStatus.off) unawaited(connect());
   }
 
@@ -1268,19 +1695,23 @@ class AppState extends ChangeNotifier {
 
   /// Дописывает в журнал состояние туннеля и журнал клиента AmneziaWG.
   Future<void> collectClientLog() async {
+    if (Platform.isAndroid) {
+      addLog(tr('На Android отдельного журнала туннеля нет.'));
+      return;
+    }
     final stats = await _tunnel.stats();
     if (stats == null) {
-      addLog('Туннель сейчас не поднят.');
+      addLog(tr('Туннель сейчас не поднят.'));
     } else {
-      addLog('Туннель: последнее рукопожатие '
-          '${stats.lastHandshake ?? 'не было'}, получено ${stats.received} '
-          'байт, отправлено ${stats.sent} байт.');
+      addLog(tr('Туннель: последнее рукопожатие '
+          '{0}, получено {1} '
+          'байт, отправлено {2} байт.', [stats.lastHandshake ?? tr('не было'), stats.received, stats.sent]));
     }
-    _addBlock('журнал клиента AmneziaWG', await _tunnel.clientLog());
+    _addBlock(tr('журнал клиента AmneziaWG'), await _tunnel.clientLog());
   }
 
   Future<bool> _reachable(String host) async {
-    final http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    final http = _checkClient(const Duration(seconds: 5));
     try {
       final request = await http
           .headUrl(Uri.parse('https://$host/'))
@@ -1299,15 +1730,15 @@ class AppState extends ChangeNotifier {
   }
 
   static String _mbit(double bytesPerSecond) =>
-      '${(bytesPerSecond * 8 / 1e6).toStringAsFixed(1).replaceAll('.', ',')} '
-      'Мбит/с';
+      tr('{0} '
+      'Мбит/с', [decimal(bytesPerSecond * 8 / 1e6)]);
 
   /// Замеряет скорость через туннель на узле измерения скорости Cloudflare:
   /// скачивает 8 МБ и отправляет 2 МБ.
   Future<({double down, double up, bool throughTunnel})> _speedTest() async {
     const host = 'speed.cloudflare.com';
     final profile = server;
-    if (profile == null) throw 'нет сервера';
+    if (profile == null) throw tr('нет сервера');
     if (!settings.fullTunnel) {
       // Адреса узла измерения направляем в туннель, иначе замерится
       // скорость обычного подключения.
@@ -1327,8 +1758,8 @@ class AppState extends ChangeNotifier {
       }
     }
 
-    final before = await _tunnel.stats();
-    final http = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    final before = await _tunnelStats();
+    final http = _checkClient(const Duration(seconds: 8));
     try {
       // Загрузка.
       final request = await http
@@ -1337,7 +1768,7 @@ class AppState extends ChangeNotifier {
       final response =
           await request.close().timeout(const Duration(seconds: 10));
       if (response.statusCode != 200) {
-        throw 'узел измерения ответил кодом ${response.statusCode}';
+        throw tr('узел измерения ответил кодом {0}', [response.statusCode]);
       }
       final watch = Stopwatch()..start();
       var got = 0;
@@ -1352,7 +1783,7 @@ class AppState extends ChangeNotifier {
         // Поток замер — считаем по тому, что успело прийти.
       }
       final downSeconds = watch.elapsedMilliseconds / 1000;
-      if (got < 100000 || downSeconds <= 0) throw 'слишком мало данных';
+      if (got < 100000 || downSeconds <= 0) throw tr('слишком мало данных');
       final down = got / downSeconds;
 
       // Отдача.
@@ -1373,7 +1804,7 @@ class AppState extends ChangeNotifier {
       final upSeconds = upWatch.elapsedMilliseconds / 1000;
       final up = upSeconds <= 0 ? 0.0 : size / upSeconds;
 
-      final after = await _tunnel.stats();
+      final after = await _tunnelStats();
       // Если счётчик туннеля вырос хотя бы на половину скачанного, замер шёл
       // через туннель.
       final through = before != null &&
@@ -1392,21 +1823,21 @@ class AppState extends ChangeNotifier {
     checking = true;
     checkSummary = '';
     checkAdvice = '';
-    final client = CheckStep('Клиент AmneziaWG');
-    final link = CheckStep('Связь с сервером');
-    final traffic = CheckStep('Трафик через туннель');
+    final client = CheckStep(tr('Клиент AmneziaWG'));
+    final link = CheckStep(tr('Связь с сервером'));
+    final traffic = CheckStep(tr('Трафик через туннель'));
     final dns = CheckStep('DNS');
-    final routes = CheckStep('Маршруты');
-    final sites = CheckStep('Включённые сервисы');
-    final speed = CheckStep('Скорость');
-    final remote = CheckStep('Сервер изнутри');
+    final routes = CheckStep(tr('Маршруты'));
+    final sites = CheckStep(tr('Включённые сервисы'));
+    final speed = CheckStep(tr('Скорость'));
+    final remote = CheckStep(tr('Сервер изнутри'));
     checks = [client, link, traffic, dns, routes, sites, speed, remote];
     notifyListeners();
 
     void begin(CheckStep step) {
       step
         ..state = CheckState.run
-        ..note = 'проверяю…';
+        ..note = tr('проверяю…');
       notifyListeners();
     }
 
@@ -1419,20 +1850,22 @@ class AppState extends ChangeNotifier {
 
     final advice = <String>[];
     final on = status == VpnStatus.on;
-    const offNote = 'VPN выключен — включите его и повторите';
+    final offNote = tr('VPN выключен — включите его и повторите');
 
     try {
       // 1. Клиент.
       begin(client);
-      if (!_tunnel.isInstalled) {
+      if (Platform.isAndroid) {
+        end(client, CheckState.ok, tr('встроен в приложение'));
+      } else if (!_tunnel.isInstalled) {
         end(client, CheckState.warn,
-            'ещё не установлен — поставится при первом включении VPN');
+            tr('ещё не установлен — поставится при первом включении VPN'));
       } else if (on && !await _tunnel.isRunning()) {
-        end(client, CheckState.fail, 'установлен, но служба туннеля не запущена');
-        advice.add('Выключите и снова включите VPN.');
+        end(client, CheckState.fail, tr('установлен, но служба туннеля не запущена'));
+        advice.add(tr('Выключите и снова включите VPN.'));
       } else {
         end(client, CheckState.ok,
-            on ? 'установлен, служба туннеля запущена' : 'установлен');
+            on ? tr('установлен, служба туннеля запущена') : tr('установлен'));
       }
 
       // 2. Связь с сервером.
@@ -1440,20 +1873,20 @@ class AppState extends ChangeNotifier {
       if (!on) {
         end(link, CheckState.skip, offNote);
       } else {
-        final stats = await _tunnel.stats();
+        final stats = await _tunnelStats();
         final last = stats?.lastHandshake;
         if (last == null) {
-          end(link, CheckState.fail, 'рукопожатия с сервером не было');
-          advice.add('Проверьте, что сервер включён и его UDP-порт открыт '
-              'в файрволе хостинга.');
+          end(link, CheckState.fail, tr('рукопожатия с сервером не было'));
+          advice.add(tr('Проверьте, что сервер включён и его UDP-порт открыт '
+              'в файрволе хостинга.'));
         } else {
           final age = DateTime.now().difference(last).inSeconds;
           if (age > 190) {
             end(link, CheckState.warn,
-                'последнее рукопожатие $age с назад — связь могла пропасть');
-            advice.add('Сервер давно не отвечал. Проверьте, что он работает.');
+                tr('последнее рукопожатие {0} с назад — связь могла пропасть', [age]));
+            advice.add(tr('Сервер давно не отвечал. Проверьте, что он работает.'));
           } else {
-            end(link, CheckState.ok, 'рукопожатие $age с назад');
+            end(link, CheckState.ok, tr('рукопожатие {0} с назад', [age]));
           }
         }
       }
@@ -1462,23 +1895,25 @@ class AppState extends ChangeNotifier {
       begin(traffic);
       if (!on) {
         end(traffic, CheckState.skip, offNote);
+      } else if (appMode && !settings.fullTunnel) {
+        end(traffic, CheckState.skip,
+            tr('в режиме «Приложения» само ColdVPN идёт мимо VPN'));
       } else {
-        final http = HttpClient()
-          ..connectionTimeout = const Duration(seconds: 8);
+        final http = _checkClient(const Duration(seconds: 8));
         try {
           final address = await _probeOnce(http);
           exitAddress = address;
           final expected = server?.host;
           if (expected != null && address != expected) {
             end(traffic, CheckState.ok,
-                'сайты видят адрес $address (у сервера другой исходящий адрес)');
+                tr('сайты видят адрес {0} (у сервера другой исходящий адрес)', [address]));
           } else {
-            end(traffic, CheckState.ok, 'сайты видят адрес сервера $address');
+            end(traffic, CheckState.ok, tr('сайты видят адрес сервера {0}', [address]));
           }
         } catch (_) {
-          end(traffic, CheckState.fail, 'запрос через туннель не прошёл');
-          advice.add('Туннель поднят, но трафик не проходит. Запустите '
-              'проверку «Сервер изнутри» — для неё нужен пароль от сервера.');
+          end(traffic, CheckState.fail, tr('запрос через туннель не прошёл'));
+          advice.add(tr('Туннель поднят, но трафик не проходит. Запустите '
+              'проверку «Сервер изнутри» — для неё нужен пароль от сервера.'));
         } finally {
           http.close(force: true);
         }
@@ -1491,7 +1926,9 @@ class AppState extends ChangeNotifier {
         end(dns, CheckState.skip, offNote);
       } else if (_dns == null && !settings.fullTunnel) {
         end(dns, CheckState.skip,
-            'маршруты по доменам выключены — работают только списки IP');
+            Platform.isAndroid
+                ? tr('на Android маршрутов по доменам нет — работают списки IP')
+                : tr('маршруты по доменам выключены — работают только списки IP'));
       } else {
         String sample = settings.fullTunnel ? 'www.cloudflare.com' : '';
         for (final s in sample.isEmpty ? active : const <ServiceEntry>[]) {
@@ -1503,7 +1940,7 @@ class AppState extends ChangeNotifier {
           }
         }
         if (sample.isEmpty) {
-          end(dns, CheckState.skip, 'у включённых сервисов нет доменов');
+          end(dns, CheckState.skip, tr('у включённых сервисов нет доменов'));
         } else {
           final watch = Stopwatch()..start();
           try {
@@ -1511,14 +1948,14 @@ class AppState extends ChangeNotifier {
                 .timeout(const Duration(seconds: 8));
             final ms = watch.elapsedMilliseconds;
             end(dns, ms > 1500 ? CheckState.warn : CheckState.ok,
-                'имя $sample найдено за $ms мс');
+                tr('имя {0} найдено за {1} мс', [sample, ms]));
             if (ms > 1500) {
-              advice.add('DNS отвечает медленно — сайты могут открываться '
-                  'с задержкой. Попробуйте другой DNS в настройках.');
+              advice.add(tr('DNS отвечает медленно — сайты могут открываться '
+                  'с задержкой. Попробуйте другой DNS в настройках.'));
             }
           } catch (_) {
-            end(dns, CheckState.fail, 'имя $sample не найдено');
-            advice.add('DNS не отвечает. Попробуйте другой DNS в настройках.');
+            end(dns, CheckState.fail, tr('имя {0} не найдено', [sample]));
+            advice.add(tr('DNS не отвечает. Попробуйте другой DNS в настройках.'));
           }
         }
       }
@@ -1529,21 +1966,24 @@ class AppState extends ChangeNotifier {
         end(routes, CheckState.skip, offNote);
       } else {
         final expected = allowedIps(_activeCidrs).length;
-        final actual = await _tunnel.allowedIpCount();
+        // На Android маршруты задаются при создании туннеля и не теряются.
+        final actual = Platform.isAndroid
+            ? expected
+            : await _tunnel.allowedIpCount();
         if (actual == null) {
-          end(routes, CheckState.fail, 'не удалось прочитать маршруты туннеля');
+          end(routes, CheckState.fail, tr('не удалось прочитать маршруты туннеля'));
         } else if (actual < expected) {
           end(routes, CheckState.warn,
-              'в туннеле $actual из $expected адресов и диапазонов');
-          advice.add('Часть маршрутов потерялась. Выключите и включите VPN.');
+              tr('в туннеле {0} из {1} адресов и диапазонов', [actual, expected]));
+          advice.add(tr('Часть маршрутов потерялась. Выключите и включите VPN.'));
         } else {
           end(
             routes,
             CheckState.ok,
             settings.fullTunnel
-                ? 'весь трафик направлен в туннель'
-                : '${collectCidrs(services, enabled).length} диапазонов и '
-                    '${_routed.length} адресов по доменам — все на месте',
+                ? tr('весь трафик направлен в туннель')
+                : tr('{0} диапазонов и '
+                    '{1} адресов по доменам — все на месте', [collectCidrs(services, enabled).length, _routed.length]),
           );
         }
       }
@@ -1552,6 +1992,9 @@ class AppState extends ChangeNotifier {
       begin(sites);
       if (!on) {
         end(sites, CheckState.skip, offNote);
+      } else if (appMode && !settings.fullTunnel) {
+        end(sites, CheckState.skip,
+            tr('в режиме «Приложения» проверьте нужное приложение сами'));
       } else {
         final targets = <String, String>{};
         for (final s in active) {
@@ -1560,7 +2003,7 @@ class AppState extends ChangeNotifier {
           if (host.isNotEmpty) targets[s.name] = host;
         }
         if (targets.isEmpty) {
-          end(sites, CheckState.skip, 'нет сервисов с доменами для проверки');
+          end(sites, CheckState.skip, tr('нет сервисов с доменами для проверки'));
         } else {
           final names = targets.keys.toList();
           final results =
@@ -1570,17 +2013,17 @@ class AppState extends ChangeNotifier {
               if (!results[i]) names[i],
           ];
           if (failed.isEmpty) {
-            end(sites, CheckState.ok, 'отвечают все: ${names.length}');
+            end(sites, CheckState.ok, tr('отвечают все: {0}', [names.length]));
           } else {
             end(
               sites,
               failed.length == names.length ? CheckState.fail : CheckState.warn,
-              '${names.length - failed.length} из ${names.length} отвечают · '
-              'не ответили: ${failed.join(', ')}',
+              tr('{0} из {1} отвечают · '
+              'не ответили: {2}', [names.length - failed.length, names.length, failed.join(', ')]),
             );
-            advice.add('${failed.join(', ')}: нет ответа через туннель. Чаще '
+            advice.add(tr('{0}: нет ответа через туннель. Чаще '
                 'всего сервис блокирует адрес сервера — попробуйте другой '
-                'сервер.');
+                'сервер.', [failed.join(', ')]));
           }
         }
       }
@@ -1589,19 +2032,22 @@ class AppState extends ChangeNotifier {
       begin(speed);
       if (!on) {
         end(speed, CheckState.skip, offNote);
+      } else if (Platform.isAndroid && !settings.fullTunnel) {
+        end(speed, CheckState.skip,
+            tr('на Android замер работает только в режиме «Весь трафик»'));
       } else {
         try {
           final result = await _speedTest();
           if (result.throughTunnel) {
             end(speed, CheckState.ok,
-                '↓ ${_mbit(result.down)} · ↑ ${_mbit(result.up)} через туннель');
+                tr('↓ {0} · ↑ {1} через туннель', [_mbit(result.down), _mbit(result.up)]));
           } else {
             end(speed, CheckState.warn,
-                '↓ ${_mbit(result.down)} · ↑ ${_mbit(result.up)}, но замер, '
-                'похоже, прошёл мимо туннеля');
+                tr('↓ {0} · ↑ {1}, но замер, '
+                'похоже, прошёл мимо туннеля', [_mbit(result.down), _mbit(result.up)]));
           }
         } catch (e) {
-          end(speed, CheckState.warn, 'замерить не удалось: $e');
+          end(speed, CheckState.warn, tr('замерить не удалось: {0}', [e]));
         }
       }
 
@@ -1610,49 +2056,49 @@ class AppState extends ChangeNotifier {
       final creds = credentials[server?.host];
       if (creds == null) {
         end(remote, CheckState.skip,
-            'нужен пароль от сервера — введите его в «Поделиться» у этого '
-            'сервера');
+            tr('нужен пароль от сервера — введите его в «Поделиться» у этого '
+            'сервера'));
       } else {
         try {
           final lines = await diagnoseServer(creds);
-          _addBlock('диагностика сервера', lines);
+          _addBlock(tr('диагностика сервера'), lines);
           end(remote, CheckState.ok,
-              'отчёт получен и записан во вкладку «Подробно»');
+              tr('отчёт получен и записан во вкладку «Подробно»'));
         } catch (e) {
-          end(remote, CheckState.fail, 'не удалось подключиться: $e');
+          end(remote, CheckState.fail, tr('не удалось подключиться: {0}', [e]));
         }
       }
     } catch (e) {
-      addLog('Диагностика прервалась: $e');
+      addLog(tr('Диагностика прервалась: {0}', [e]));
     }
 
     int count(CheckState state) => checks.where((c) => c.state == state).length;
     final failed = count(CheckState.fail);
     final warned = count(CheckState.warn);
     if (!on) {
-      checkSummary = 'VPN выключен';
-      checkAdvice = 'Включите VPN на вкладке «Сервисы» и повторите проверку — '
-          'тогда проверятся связь, DNS, маршруты и сервисы.';
+      checkSummary = tr('VPN выключен');
+      checkAdvice = tr('Включите VPN на вкладке «Сервисы» и повторите проверку — '
+          'тогда проверятся связь, DNS, маршруты и сервисы.');
     } else if (failed > 0) {
-      checkSummary = 'Есть проблемы: $failed';
+      checkSummary = tr('Есть проблемы: {0}', [failed]);
       checkAdvice = advice.join(' ');
     } else if (warned > 0) {
-      checkSummary = 'VPN работает, замечаний: $warned';
+      checkSummary = tr('VPN работает, замечаний: {0}', [warned]);
       checkAdvice = advice.join(' ');
     } else {
-      checkSummary = 'Всё в порядке';
-      checkAdvice = 'VPN работает, включённые сервисы отвечают.';
+      checkSummary = tr('Всё в порядке');
+      checkAdvice = tr('VPN работает, включённые сервисы отвечают.');
     }
-    addLog('Диагностика завершена: в порядке ${count(CheckState.ok)}, '
-        'замечаний $warned, ошибок $failed, пропущено '
-        '${count(CheckState.skip)}.');
+    addLog(tr('Диагностика завершена: в порядке {0}, '
+        'замечаний {1}, ошибок {2}, пропущено '
+        '{3}.', [count(CheckState.ok), warned, failed, count(CheckState.skip)]));
     checking = false;
     notifyListeners();
   }
 
   /// Текст отчёта диагностики для копирования.
   String get checkReport => [
-        'Диагностика ColdVPN: $checkSummary',
+        tr('Диагностика ColdVPN: {0}', [checkSummary]),
         for (final c in checks) '${_stateWord(c.state)} — ${c.title}: ${c.note}',
         if (checkAdvice.isNotEmpty) checkAdvice,
       ].join('\n');
@@ -1660,17 +2106,17 @@ class AppState extends ChangeNotifier {
   static String _stateWord(CheckState state) {
     switch (state) {
       case CheckState.ok:
-        return 'В порядке';
+        return tr('В порядке');
       case CheckState.warn:
-        return 'Замечание';
+        return tr('Замечание');
       case CheckState.fail:
-        return 'Ошибка';
+        return tr('Ошибка');
       case CheckState.skip:
-        return 'Пропущено';
+        return tr('Пропущено');
       case CheckState.run:
-        return 'Идёт';
+        return tr('Идёт');
       case CheckState.wait:
-        return 'В очереди';
+        return tr('В очереди');
     }
   }
 

@@ -1,8 +1,11 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../server_installer.dart';
 import 'theme.dart';
+import '../l10n.dart';
 
 /// Панель «Установить на свой VPS».
 Future<void> showInstallSheet(BuildContext context, AppState state) {
@@ -51,14 +54,14 @@ class _InstallSheetState extends State<_InstallSheet> {
   }
 
   String? _validate() {
-    if (_host.text.trim().isEmpty) return 'Укажите адрес сервера.';
-    if (_port(_sshPort.text) == null) return 'Порт SSH — число от 1 до 65535.';
-    if (_user.text.trim().isEmpty) return 'Укажите логин.';
+    if (_host.text.trim().isEmpty) return tr('Укажите адрес сервера.');
+    if (_port(_sshPort.text) == null) return tr('Порт SSH — число от 1 до 65535.');
+    if (_user.text.trim().isEmpty) return tr('Укажите логин.');
     if (_password.text.isEmpty && _key.text.trim().isEmpty) {
-      return 'Укажите пароль или SSH-ключ.';
+      return tr('Укажите пароль или SSH-ключ.');
     }
     if (_vpnPort.text.trim().isNotEmpty && _port(_vpnPort.text) == null) {
-      return 'UDP-порт VPN — число от 1 до 65535 или пусто.';
+      return tr('UDP-порт VPN — число от 1 до 65535 или пусто.');
     }
     return null;
   }
@@ -84,6 +87,8 @@ class _InstallSheetState extends State<_InstallSheet> {
         password: _password.text,
         privateKeyPem: _key.text,
         vpnPort: _port(_vpnPort.text) ?? 0,
+        // У телефона и компьютера на сервере разные ключи и адреса.
+        device: Platform.isAndroid ? 'android' : 'windows',
         resetKeys: _resetKeys,
       );
       final profile = await installServer(
@@ -98,7 +103,7 @@ class _InstallSheetState extends State<_InstallSheet> {
       );
       await state.addOrReplaceServer(profile);
             await state.rememberCredentials(request, persist: _remember);
-      state.addLog('Сервер ${profile.host} настроен, UDP-порт ${profile.port}.');
+      state.addLog(tr('Сервер {0} настроен, UDP-порт {1}.', [profile.host, profile.port]));
       _password.clear();
       _key.clear();
       if (!mounted) return;
@@ -106,11 +111,11 @@ class _InstallSheetState extends State<_InstallSheet> {
         // Оставляем панель открытой, чтобы предупреждения можно было прочитать.
         setState(() {
           _done = true;
-          _error = 'Сервер сохранён, но при установке были предупреждения — '
-              'они в журнале ниже.';
+          _error = tr('Сервер сохранён, но при установке были предупреждения — '
+              'они в журнале ниже.');
         });
       } else {
-        showNote(context, 'Сервер настроен и добавлен');
+        showNote(context, tr('Сервер настроен и добавлен'));
         Navigator.of(context).pop();
       }
     } catch (e) {
@@ -126,10 +131,10 @@ class _InstallSheetState extends State<_InstallSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SheetHeader(
+          SheetHeader(
             icon: Icons.cloud_upload_outlined,
-            title: 'Установка на VPS',
-            subtitle: 'Приложение само поставит AmneziaWG',
+            title: tr('Установка на VPS'),
+            subtitle: tr('Приложение само поставит AmneziaWG'),
           ),
           const SizedBox(height: 14),
           Row(
@@ -139,7 +144,7 @@ class _InstallSheetState extends State<_InstallSheet> {
                 flex: 3,
                 child: CvField(
                   controller: _host,
-                  label: 'IP-адрес сервера',
+                  label: tr('IP-адрес сервера'),
                   hint: '203.0.113.10',
                   mono: true,
                   enabled: !_busy,
@@ -150,7 +155,7 @@ class _InstallSheetState extends State<_InstallSheet> {
                 flex: 2,
                 child: CvField(
                   controller: _sshPort,
-                  label: 'Порт SSH',
+                  label: tr('Порт SSH'),
                   mono: true,
                   enabled: !_busy,
                   keyboardType: TextInputType.number,
@@ -159,14 +164,16 @@ class _InstallSheetState extends State<_InstallSheet> {
             ],
           ),
           const SizedBox(height: 12),
-          CvField(controller: _user, label: 'Логин', enabled: !_busy),
+          CvField(controller: _user, label: tr('Логин'), enabled: !_busy),
           const SizedBox(height: 12),
           CvField(
             controller: _password,
-            label: 'Пароль',
+            label: tr('Пароль'),
             obscure: true,
             enabled: !_busy,
           ),
+          // Надёжное хранилище пароля пока есть только на Windows.
+          if (Platform.isWindows) ...[
           const SizedBox(height: 4),
           Row(
             children: [
@@ -174,10 +181,10 @@ class _InstallSheetState extends State<_InstallSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Запомнить пароль', style: tx(14, w: w600, c: C.white)),
+                    Text(tr('Запомнить пароль'), style: tx(14, w: w600, c: C.white)),
                     Text(
-                      'Чтобы потом выпускать ключи для других устройств. '
-                      'Хранится на этом компьютере в зашифрованном виде',
+                      tr('Чтобы потом выпускать ключи для других устройств. '
+                      'Хранится на этом компьютере в зашифрованном виде'),
                       style: tx(12, c: C.muted, h: 1.4),
                     ),
                   ],
@@ -185,17 +192,18 @@ class _InstallSheetState extends State<_InstallSheet> {
               ),
               CvSwitch(
                 value: _remember,
-                label: 'Запомнить пароль',
+                label: tr('Запомнить пароль'),
                 onChanged:
                     _busy ? null : (value) => setState(() => _remember = value),
               ),
             ],
           ),
+          ],
           const SizedBox(height: 6),
           Align(
             alignment: Alignment.centerLeft,
             child: CvLink(
-              label: _advanced ? 'Скрыть дополнительное' : 'Дополнительно',
+              label: _advanced ? tr('Скрыть дополнительное') : tr('Дополнительно'),
               onTap: () => setState(() => _advanced = !_advanced),
             ),
           ),
@@ -207,7 +215,7 @@ class _InstallSheetState extends State<_InstallSheet> {
             const SizedBox(height: 6),
             CvField(
               controller: _key,
-              label: 'Приватный SSH-ключ вместо пароля',
+              label: tr('Приватный SSH-ключ вместо пароля'),
               hint: '-----BEGIN OPENSSH PRIVATE KEY-----',
               mono: true,
               minLines: 2,
@@ -218,11 +226,11 @@ class _InstallSheetState extends State<_InstallSheet> {
             const SizedBox(height: 12),
             CvField(
               controller: _vpnPort,
-              label: 'UDP-порт VPN',
+              label: tr('UDP-порт VPN'),
               mono: true,
               enabled: !_busy,
               keyboardType: TextInputType.number,
-              helper: 'Пусто — сервер выберет случайный и запомнит',
+              helper: tr('Пусто — сервер выберет случайный и запомнит'),
             ),
             const SizedBox(height: 8),
             Row(
@@ -232,11 +240,11 @@ class _InstallSheetState extends State<_InstallSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Выпустить новые ключи',
+                        tr('Выпустить новые ключи'),
                         style: tx(14, w: w600, c: C.white),
                       ),
                       Text(
-                        'Уже подключённые устройства перестанут работать',
+                        tr('Уже подключённые устройства перестанут работать'),
                         style: tx(12, c: C.muted),
                       ),
                     ],
@@ -244,7 +252,7 @@ class _InstallSheetState extends State<_InstallSheet> {
                 ),
                 CvSwitch(
                   value: _resetKeys,
-                  label: 'Выпустить новые ключи',
+                  label: tr('Выпустить новые ключи'),
                   onChanged: _busy
                       ? null
                       : (value) => setState(() => _resetKeys = value),
@@ -278,13 +286,13 @@ class _InstallSheetState extends State<_InstallSheet> {
           const SizedBox(height: 14),
           if (_done)
             CvButton(
-              label: 'Готово',
+              label: tr('Готово'),
               kind: CvButtonKind.primary,
               onTap: () => Navigator.of(context).pop(),
             )
           else
             CvButton(
-              label: _busy ? 'Устанавливаю…' : 'Установить AmneziaWG',
+              label: _busy ? tr('Устанавливаю…') : tr('Установить AmneziaWG'),
               kind: CvButtonKind.primary,
               onTap: _busy ? null : _install,
             ),

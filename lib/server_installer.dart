@@ -5,6 +5,7 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'models.dart';
+import 'l10n.dart';
 
 /// Что пользователь ввёл на экране настройки сервера.
 class InstallRequest {
@@ -50,10 +51,11 @@ Future<void> _runRemoteScript(
   void Function(String line) onLine,
 ) async {
   // Скрипт обязан уйти на сервер с переводами строк Unix.
-  final script = (await rootBundle.loadString(asset)).replaceAll('\r', '');
+  final script =
+      localizeScript((await rootBundle.loadString(asset)).replaceAll('\r', ''));
   final encoded = base64.encode(utf8.encode(script));
 
-  status('Подключаюсь к ${request.host}:${request.sshPort}…');
+  status(tr('Подключаюсь к {0}:{1}…', [request.host, request.sshPort]));
   final SSHSocket socket;
   try {
     socket = await SSHSocket.connect(
@@ -63,7 +65,7 @@ Future<void> _runRemoteScript(
     );
   } catch (e) {
     throw InstallException(
-      'Сервер не отвечает по SSH (${request.host}:${request.sshPort}): $e',
+      tr('Сервер не отвечает по SSH ({0}:{1}): {2}', [request.host, request.sshPort, e]),
     );
   }
 
@@ -74,7 +76,7 @@ Future<void> _runRemoteScript(
       identities = SSHKeyPair.fromPem(pem);
     } catch (e) {
       socket.close();
-      throw InstallException('Не удалось прочитать SSH-ключ: $e');
+      throw InstallException(tr('Не удалось прочитать SSH-ключ: {0}', [e]));
     }
   }
   final password = request.password ?? '';
@@ -93,9 +95,9 @@ Future<void> _runRemoteScript(
     try {
       await client.authenticated;
     } catch (e) {
-      throw InstallException('Сервер не принял логин или пароль: $e');
+      throw InstallException(tr('Сервер не принял логин или пароль: {0}', [e]));
     }
-    status('Вход выполнен.');
+    status(tr('Вход выполнен.'));
 
     // Скрипт сначала сохраняется во временный файл и запускается из него.
     // Если отдать его bash через stdin, любая команда внутри, читающая
@@ -142,9 +144,9 @@ Future<ServerProfile> installServer(
       if (eq > 0) result[pair.substring(0, eq)] = pair.substring(eq + 1);
     } else if (line.startsWith('SVPN_ERROR: ')) {
       error = line.substring('SVPN_ERROR: '.length);
-      log('Ошибка: $error');
+      log(tr('Ошибка: {0}', [error]));
     } else if (line.startsWith('SVPN_WARN: ')) {
-      final text = 'Внимание: ${line.substring('SVPN_WARN: '.length)}';
+      final text = tr('Внимание: {0}', [line.substring('SVPN_WARN: '.length)]);
       log(text);
       important?.call(text, problem: true);
     } else if (line.startsWith('SVPN_SELFTEST ')) {
@@ -153,8 +155,8 @@ Future<ServerProfile> installServer(
           .substring(ok ? 'SVPN_SELFTEST ok'.length : 'SVPN_SELFTEST fail'.length)
           .trim();
       final text = ok
-          ? 'Самопроверка на сервере пройдена $detail.'
-          : 'Самопроверка на сервере НЕ пройдена $detail.';
+          ? tr('Самопроверка на сервере пройдена {0}.', [detail])
+          : tr('Самопроверка на сервере НЕ пройдена {0}.', [detail]);
       log(text);
       important?.call(text, problem: !ok);
     } else if (line == 'SVPN_DONE') {
@@ -168,9 +170,9 @@ Future<ServerProfile> installServer(
   if (!done) {
     throw InstallException(
       request.username == 'root'
-          ? 'Установка прервалась, подробности в журнале выше.'
-          : 'Установка прервалась. Пользователю ${request.username} нужен '
-              'sudo без пароля — проще всего войти под root.',
+          ? tr('Установка прервалась, подробности в журнале выше.')
+          : tr('Установка прервалась. Пользователю {0} нужен '
+              'sudo без пароля — проще всего войти под root.', [request.username]),
     );
   }
 
@@ -194,9 +196,9 @@ Future<ServerProfile> installServer(
       profile.serverPublicKey.isEmpty ||
       profile.clientPrivateKey.isEmpty ||
       profile.clientAddress.isEmpty) {
-    throw InstallException('Сервер не вернул данные подключения.');
+    throw InstallException(tr('Сервер не вернул данные подключения.'));
   }
-  log('Готово: AmneziaWG установлен и запущен.');
+  log(tr('Готово: AmneziaWG установлен и запущен.'));
   return profile;
 }
 

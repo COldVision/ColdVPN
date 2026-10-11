@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'l10n.dart';
 
 /// Проверяет, относится ли имя к одному из включённых сервисов.
 class DomainMatcher {
@@ -193,7 +194,7 @@ class DnsProxy {
       _tcp = tcp;
       tcp.listen(_relayTcp, onError: (_) {});
     } catch (e) {
-      log('DNS по TCP недоступен: $e');
+      log(tr('DNS по TCP недоступен: {0}', [e]));
     }
   }
 
@@ -298,10 +299,10 @@ class DnsProxy {
     if (answer == null) unanswered++;
     if (_detailed < 40) {
       _detailed++;
-      log('DNS: ${question.name} — адресов ${addresses.length}, через туннель '
-          '${tunnelAnswer == null ? 'нет ответа' : 'ответ'}, напрямую '
-          '${direct == null ? 'нет ответа' : 'ответ'}, '
-          '${watch.elapsedMilliseconds} мс, запрос $path');
+      log(tr('DNS: {0} — адресов {1}, через туннель '
+          '{2}, напрямую '
+          '{3}, '
+          '{4} мс, запрос {5}', [question.name, addresses.length, tunnelAnswer == null ? tr('нет ответа') : tr('ответ'), direct == null ? tr('нет ответа') : tr('ответ'), watch.elapsedMilliseconds, path]));
     }
     return answer;
   }

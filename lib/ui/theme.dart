@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../catalog.dart';
 import '../models.dart';
+import '../l10n.dart';
 
 /// Цвета интерфейса.
 class C {
@@ -246,7 +247,7 @@ class CvSwitch extends StatelessWidget {
   Widget build(BuildContext context) {
     final handler = locked ? null : onChanged;
     return Semantics(
-      label: locked ? '$label, заблокировано' : label,
+      label: locked ? tr('{0}, заблокировано', [label]) : label,
       toggled: value,
       button: true,
       enabled: handler != null,
@@ -618,7 +619,7 @@ class CountryBadge extends StatelessWidget {
     );
     final index = flagIndex(code);
     return Semantics(
-      label: server.country.isEmpty ? 'Страна неизвестна' : server.country,
+      label: server.country.isEmpty ? tr('Страна неизвестна') : server.country,
       excludeSemantics: true,
       child: Container(
         width: 30,
@@ -857,7 +858,7 @@ class SheetHeader extends StatelessWidget {
         const SizedBox(width: 8),
         CvIconButton(
           icon: Icons.close,
-          tooltip: 'Закрыть',
+          tooltip: tr('Закрыть'),
           framed: false,
           onTap: () => Navigator.of(context).pop(),
         ),
@@ -922,6 +923,55 @@ class DangerConfirm extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Строка-действие в списке: название, пояснение и стрелка.
+class ActionLine extends StatelessWidget {
+  const ActionLine({
+    super.key,
+    required this.title,
+    required this.note,
+    required this.onTap,
+    this.danger = false,
+  });
+
+  final String title;
+  final String note;
+  final VoidCallback onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? C.dangerText : C.white;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(13),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(title, style: tx(14, w: w600, c: color)),
+                    if (note.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(note, style: tx(12, c: C.muted, h: 1.4)),
+                    ],
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: color),
+            ],
+          ),
+        ),
       ),
     );
   }

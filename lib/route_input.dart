@@ -1,3 +1,5 @@
+import 'l10n.dart';
+
 /// Разбор того, что пользователь ввёл на экране «Свой маршрут».
 enum RouteLineKind { domain, network, address, duplicate, error }
 
@@ -39,29 +41,29 @@ RouteLine parseRouteLine(String raw) {
     final octets = [for (var i = 1; i <= 4; i++) int.parse(ip.group(i)!)];
     if (octets.any((o) => o > 255)) {
       return RouteLine(RouteLineKind.error, source,
-          'пропущено: число в адресе больше 255');
+          tr('пропущено: число в адресе больше 255'));
     }
     final address = octets.join('.');
     final mask = ip.group(5);
     if (mask == null || mask == '32') {
-      return RouteLine(RouteLineKind.address, address, 'один адрес');
+      return RouteLine(RouteLineKind.address, address, tr('один адрес'));
     }
     final bits = int.parse(mask);
     if (bits > 32) {
       return RouteLine(RouteLineKind.error, source,
-          'пропущено: маска должна быть от 0 до 32');
+          tr('пропущено: маска должна быть от 0 до 32'));
     }
-    if (bits < 8) {
+    if (bits < 5) {
       return RouteLine(RouteLineKind.error, source,
-          'пропущено: слишком широкий диапазон, минимум /8');
+          tr('пропущено: слишком широкий диапазон, минимум /5'));
     }
     return RouteLine(
-        RouteLineKind.network, '$address/$bits', '${1 << (32 - bits)} адресов');
+        RouteLineKind.network, '$address/$bits', tr('{0} адресов', [1 << (32 - bits)]));
   }
 
   if (v.split(':').length > 2 && _ipv6Like.hasMatch(v)) {
     return RouteLine(
-        RouteLineKind.error, source, 'пропущено: IPv6 пока не поддерживается');
+        RouteLineKind.error, source, tr('пропущено: IPv6 пока не поддерживается'));
   }
 
   final hadPath = v.contains(RegExp(r'[/?#]'));
@@ -73,12 +75,12 @@ RouteLine parseRouteLine(String raw) {
       .replaceFirst(RegExp(r'\.$'), '');
   if (v.length > 253 || !_domain.hasMatch(v)) {
     return RouteLine(
-        RouteLineKind.error, source, 'пропущено: не похоже на домен или IP');
+        RouteLineKind.error, source, tr('пропущено: не похоже на домен или IP'));
   }
   return RouteLine(
     RouteLineKind.domain,
     v,
-    (fromLink || hadPath) ? 'домен из ссылки, с поддоменами' : 'с поддоменами',
+    (fromLink || hadPath) ? tr('домен из ссылки, с поддоменами') : tr('с поддоменами'),
   );
 }
 
@@ -93,7 +95,7 @@ List<RouteLine> parseRouteText(String text) {
     final parsed = parseRouteLine(line);
     if (parsed.accepted && !seen.add(parsed.value)) {
       result.add(RouteLine(RouteLineKind.duplicate, parsed.value,
-          'повтор — будет пропущен'));
+          tr('повтор — будет пропущен')));
     } else {
       result.add(parsed);
     }
@@ -103,6 +105,8 @@ List<RouteLine> parseRouteText(String text) {
 
 /// Русское склонение: `plural(2, 'домен', 'домена', 'доменов')`.
 String plural(int n, String one, String few, String many) {
+  // В английском форм две; слова сюда приходят уже переведёнными.
+  if (appLang != 'ru') return n == 1 ? '$n $one' : '$n $many';
   final mod10 = n % 10;
   final mod100 = n % 100;
   if (mod10 == 1 && mod100 != 11) return '$n $one';

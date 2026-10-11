@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'server_installer.dart';
+import 'l10n.dart';
 
 /// Хранилище данных для входа на серверы (пароль или SSH-ключ).
 ///
@@ -38,7 +39,7 @@ class SecretStore {
     final code = await process.exitCode.timeout(const Duration(seconds: 30));
     final text = (await output).trim();
     if (code != 0 || text.isEmpty) {
-      throw 'защита данных Windows вернула ошибку: ${(await errors).trim()}';
+      throw tr('защита данных Windows вернула ошибку: {0}', [(await errors).trim()]);
     }
     return text;
   }

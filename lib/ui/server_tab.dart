@@ -13,19 +13,22 @@ import '../awg_config.dart';
 import '../models.dart';
 import '../qr_tools.dart';
 import '../server_installer.dart';
+import 'files.dart';
 import 'install_sheet.dart';
+import 'qr_scan_page.dart';
 import 'shell.dart';
 import 'theme.dart';
+import '../l10n.dart';
 
-const _confFiles = XTypeGroup(label: 'Конфиг AmneziaWG', extensions: ['conf']);
-const _imageFiles = XTypeGroup(
-  label: 'Картинка с QR-кодом',
+XTypeGroup get _confFiles => XTypeGroup(label: tr('Конфиг AmneziaWG'), extensions: ['conf']);
+XTypeGroup get _imageFiles => XTypeGroup(
+  label: tr('Картинка с QR-кодом'),
   extensions: ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp'],
 );
-const _pngFiles = XTypeGroup(label: 'Картинка PNG', extensions: ['png']);
+XTypeGroup get _pngFiles => XTypeGroup(label: tr('Картинка PNG'), extensions: ['png']);
 
-const _notConf = 'Не похоже на конфиг AmneziaWG: нужны секции [Interface] '
-    '(PrivateKey, Address) и [Peer] (PublicKey, Endpoint).';
+String get _notConf => tr('Не похоже на конфиг AmneziaWG: нужны секции [Interface] '
+    '(PrivateKey, Address) и [Peer] (PublicKey, Endpoint).');
 
 /// Вкладка «Сервер»: выбранный сервер, список серверов и добавление.
 class ServerTab extends StatelessWidget {
@@ -35,7 +38,7 @@ class ServerTab extends StatelessWidget {
 
   Future<void> _importFile(BuildContext context) async {
     try {
-      final file = await openFile(acceptedTypeGroups: const [_confFiles]);
+      final file = await pickFile(_confFiles);
       if (file == null) return;
       final profile = parseClientConf(await file.readAsString());
       if (!context.mounted) return;
@@ -44,37 +47,81 @@ class ServerTab extends StatelessWidget {
         return;
       }
       final entry = await state.addServer(profile);
-      state.addLog('Импортирован конфиг сервера ${profile.host}:'
-          '${profile.port} из файла.');
-      if (context.mounted) showNote(context, 'Сервер «${entry.name}» добавлен');
+      state.addLog(tr('Импортирован конфиг сервера {0}:'
+          '{1} из файла.', [profile.host, profile.port]));
+      if (context.mounted) showNote(context, tr('Сервер «{0}» добавлен', [entry.name]));
     } catch (e) {
-      if (context.mounted) showNote(context, 'Не удалось прочитать файл: $e');
+      if (context.mounted) showNote(context, tr('Не удалось прочитать файл: {0}', [e]));
     }
   }
 
+  /// На телефоне сначала спрашивает, откуда брать код: с камеры или с
+  /// картинки. На компьютере — сразу картинка.
   Future<void> _importQr(BuildContext context) async {
+    if (!Platform.isAndroid) return _importQrImage(context);
+    final source = await showCvSheet<String>(
+      context,
+      builder: (sheet) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SheetHeader(icon: Icons.qr_code, title: tr('Импорт из QR-кода')),
+          const SizedBox(height: 10),
+          _ActionRow(
+            icon: Icons.photo_camera_outlined,
+            title: tr('Сканировать камерой'),
+            note: tr('Наведите телефон на код'),
+            onTap: () => Navigator.of(sheet).pop('camera'),
+          ),
+          _ActionRow(
+            icon: Icons.image_outlined,
+            title: tr('Выбрать картинку'),
+            note: tr('Снимок экрана или фото с кодом'),
+            onTap: () => Navigator.of(sheet).pop('image'),
+          ),
+        ],
+      ),
+    );
+    if (!context.mounted || source == null) return;
+    if (source == 'image') return _importQrImage(context);
+    final text = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const QrScanPage()),
+    );
+    if (text == null || !context.mounted) return;
+    await _addFromQr(context, text);
+  }
+
+  Future<void> _importQrImage(BuildContext context) async {
     try {
-      final file = await openFile(acceptedTypeGroups: const [_imageFiles]);
+      final file = await pickFile(_imageFiles, mobileMime: 'image/*');
       if (file == null) return;
       final bytes = await file.readAsBytes();
       // Распознавание идёт в фоне, чтобы окно не замирало.
       final text = await compute(decodeQrImage, bytes);
       if (!context.mounted) return;
       if (text == null) {
-        showNote(context, 'На картинке не удалось найти QR-код.');
+        showNote(context, tr('На картинке не удалось найти QR-код.'));
         return;
       }
+      await _addFromQr(context, text);
+    } catch (e) {
+      if (context.mounted) showNote(context, tr('Не удалось прочитать картинку: {0}', [e]));
+    }
+  }
+
+  Future<void> _addFromQr(BuildContext context, String text) async {
+    try {
       final profile = parseClientConf(text);
       if (profile == null) {
-        showNote(context, 'В QR-коде не конфиг AmneziaWG.');
+        showNote(context, tr('В QR-коде не конфиг AmneziaWG.'));
         return;
       }
       final entry = await state.addServer(profile);
-      state.addLog('Импортирован конфиг сервера ${profile.host}:'
-          '${profile.port} из QR-кода.');
-      if (context.mounted) showNote(context, 'Сервер «${entry.name}» добавлен');
+      state.addLog(tr('Импортирован конфиг сервера {0}:'
+          '{1} из QR-кода.', [profile.host, profile.port]));
+      if (context.mounted) showNote(context, tr('Сервер «{0}» добавлен', [entry.name]));
     } catch (e) {
-      if (context.mounted) showNote(context, 'Не удалось прочитать картинку: $e');
+      if (context.mounted) showNote(context, tr('Не удалось добавить сервер: {0}', [e]));
     }
   }
 
@@ -85,7 +132,7 @@ class ServerTab extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         TabHeader(
-          title: 'Сервер',
+          title: tr('Сервер'),
           trailing: ServerPicker(state: state),
         ),
         Expanded(
@@ -97,11 +144,11 @@ class ServerTab extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Сервера пока нет', style: tx(16, w: w600, c: C.white)),
+                      Text(tr('Сервера пока нет'), style: tx(16, w: w600, c: C.white)),
                       const SizedBox(height: 4),
                       Text(
-                        'Арендуйте VPS и установите на него VPN прямо отсюда '
-                        'или добавьте готовый конфиг AmneziaWG.',
+                        tr('Арендуйте VPS и установите на него VPN прямо отсюда '
+                        'или добавьте готовый конфиг AmneziaWG.'),
                         style: tx(13, c: C.muted, h: 1.45),
                       ),
                     ],
@@ -111,7 +158,7 @@ class ServerTab extends StatelessWidget {
                 _CurrentCard(state: state, server: current),
               if (state.servers.isNotEmpty) ...[
                 const SizedBox(height: 14),
-                const SectionTitle('Мои серверы'),
+                SectionTitle(tr('Мои серверы')),
                 const SizedBox(height: 8),
                 for (final s in state.servers)
                   Padding(
@@ -124,7 +171,7 @@ class ServerTab extends StatelessWidget {
                   ),
               ],
               const SizedBox(height: 6),
-              const SectionTitle('Добавить сервер'),
+              SectionTitle(tr('Добавить сервер')),
               const SizedBox(height: 8),
               CvCard(
                 padding: const EdgeInsets.all(6),
@@ -132,26 +179,28 @@ class ServerTab extends StatelessWidget {
                   children: [
                     _ActionRow(
                       icon: Icons.cloud_upload_outlined,
-                      title: 'Установить на свой VPS',
-                      note: 'Нужны адрес сервера, логин и пароль',
+                      title: tr('Установить на свой VPS'),
+                      note: tr('Нужны адрес сервера, логин и пароль'),
                       onTap: () => showInstallSheet(context, state),
                     ),
                     _ActionRow(
                       icon: Icons.insert_drive_file_outlined,
-                      title: 'Импорт из файла .conf',
-                      note: 'Готовый конфиг AmneziaWG',
+                      title: tr('Импорт из файла .conf'),
+                      note: tr('Готовый конфиг AmneziaWG'),
                       onTap: () => _importFile(context),
                     ),
                     _ActionRow(
                       icon: Icons.qr_code,
-                      title: 'Импорт из QR-кода',
-                      note: 'Картинка или снимок экрана с кодом',
+                      title: tr('Импорт из QR-кода'),
+                      note: Platform.isAndroid
+                          ? tr('Камерой или с картинки')
+                          : tr('Картинка или снимок экрана с кодом'),
                       onTap: () => _importQr(context),
                     ),
                     _ActionRow(
                       icon: Icons.content_paste,
-                      title: 'Вставить конфиг текстом',
-                      note: 'Например, из сообщения',
+                      title: tr('Вставить конфиг текстом'),
+                      note: tr('Например, из сообщения'),
                       onTap: () => showCvSheet<void>(
                         context,
                         builder: (_) => _PasteSheet(state: state),
@@ -208,7 +257,7 @@ class _CurrentCard extends StatelessWidget {
                   ),
                 ),
                 child: Text(
-                  on ? 'Подключён' : 'Не подключён',
+                  on ? tr('Подключён') : tr('Не подключён'),
                   style: tx(12, w: w600, c: on ? const Color(0xFFC9F7EE) : C.soft),
                 ),
               ),
@@ -223,7 +272,7 @@ class _CurrentCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  server.place.isEmpty ? 'Место не определено' : server.place,
+                  server.place.isEmpty ? tr('Место не определено') : server.place,
                   overflow: TextOverflow.ellipsis,
                   style: tx(14, c: C.text),
                 ),
@@ -233,13 +282,13 @@ class _CurrentCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              _Stat(label: 'Порт', value: '${server.profile.port}'),
+              _Stat(label: tr('Порт'), value: '${server.profile.port}'),
               _Stat(
-                label: 'Связь',
-                value: !on ? '—' : (age == null ? 'нет' : '$age с назад'),
+                label: tr('Связь'),
+                value: !on ? '—' : (age == null ? tr('нет') : tr('{0} с назад', [age])),
               ),
               _Stat(
-                label: 'Трафик',
+                label: tr('Трафик'),
                 value: on ? formatBytes(state.received + state.sent) : '—',
               ),
             ],
@@ -362,7 +411,7 @@ class _ServerRow extends StatelessWidget {
           ),
           CvIconButton(
             icon: Icons.more_vert,
-            tooltip: 'Действия с сервером «${server.name}»',
+            tooltip: tr('Действия с сервером «{0}»', [server.name]),
             framed: false,
             onTap: () => showCvSheet<void>(
               context,
@@ -465,7 +514,7 @@ class _PasteSheetState extends State<_PasteSheet> {
     }
     await widget.state.addServer(profile);
     widget.state.addLog(
-      'Добавлен сервер ${profile.host}:${profile.port} из вставленного текста.',
+      tr('Добавлен сервер {0}:{1} из вставленного текста.', [profile.host, profile.port]),
     );
     if (mounted) Navigator.of(context).pop();
   }
@@ -476,15 +525,15 @@ class _PasteSheetState extends State<_PasteSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SheetHeader(
+          SheetHeader(
             icon: Icons.content_paste,
-            title: 'Вставить конфиг',
-            subtitle: 'Текст конфига AmneziaWG',
+            title: tr('Вставить конфиг'),
+            subtitle: tr('Текст конфига AmneziaWG'),
           ),
           const SizedBox(height: 14),
           CvField(
             controller: _text,
-            label: 'Текст конфига',
+            label: tr('Текст конфига'),
             hint: '[Interface]\nPrivateKey = …\nAddress = …\n\n'
                 '[Peer]\nPublicKey = …\nEndpoint = …',
             mono: true,
@@ -494,9 +543,9 @@ class _PasteSheetState extends State<_PasteSheet> {
             onChanged: (_) {
               if (_error != null) setState(() => _error = null);
             },
-            trailing: CvLink(label: 'Вставить из буфера', onTap: _paste),
-            helper: 'Маршруты из конфига не используются: через VPN пойдёт '
-                'то, что выбрано на вкладке «Сервисы».',
+            trailing: CvLink(label: tr('Вставить из буфера'), onTap: _paste),
+            helper: tr('Маршруты из конфига не используются: через VPN пойдёт '
+                'то, что выбрано на вкладке «Сервисы».'),
           ),
           Reveal(
             show: _error != null,
@@ -510,14 +559,14 @@ class _PasteSheetState extends State<_PasteSheet> {
             children: [
               Expanded(
                 child: CvButton(
-                  label: 'Отмена',
+                  label: tr('Отмена'),
                   onTap: () => Navigator.of(context).pop(),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: CvButton(
-                  label: 'Добавить',
+                  label: tr('Добавить'),
                   kind: CvButtonKind.primary,
                   onTap: _add,
                 ),
@@ -597,17 +646,17 @@ class _ServerSheetState extends State<_ServerSheet> {
 
   Future<void> _saveFile(SavedServer server, String conf) async {
     try {
-      final location = await getSaveLocation(
-        suggestedName: '${_safeName(server)}.conf',
-        acceptedTypeGroups: const [_confFiles],
+      final note = savedNote(
+        tr('Файл сохранён'),
+        await saveTextFile(
+          name: '${_safeName(server)}.conf',
+          text: conf,
+          type: _confFiles,
+        ),
       );
-      if (location == null) return;
-      var path = location.path;
-      if (!path.toLowerCase().endsWith('.conf')) path = '$path.conf';
-      await File(path).writeAsString(conf);
-      if (mounted) showNote(context, 'Файл сохранён: $path');
+      if (mounted && note != null) showNote(context, note);
     } catch (e) {
-      if (mounted) showNote(context, 'Не удалось сохранить файл: $e');
+      if (mounted) showNote(context, tr('Не удалось сохранить файл: {0}', [e]));
     }
   }
 
@@ -618,18 +667,19 @@ class _ServerSheetState extends State<_ServerSheet> {
       // Втрое крупнее, чем на экране: так код уверенно читается камерой.
       final image = await boundary.toImage(pixelRatio: 3);
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (data == null) throw 'не удалось получить картинку';
-      final location = await getSaveLocation(
-        suggestedName: '${_safeName(server)}.png',
-        acceptedTypeGroups: const [_pngFiles],
+      if (data == null) throw tr('не удалось получить картинку');
+      final note = savedNote(
+        tr('QR-код сохранён'),
+        await saveFile(
+          name: '${_safeName(server)}.png',
+          bytes: data.buffer.asUint8List(),
+          type: _pngFiles,
+          mimeType: 'image/png',
+        ),
       );
-      if (location == null) return;
-      var path = location.path;
-      if (!path.toLowerCase().endsWith('.png')) path = '$path.png';
-      await File(path).writeAsBytes(data.buffer.asUint8List());
-      if (mounted) showNote(context, 'QR-код сохранён: $path');
+      if (mounted && note != null) showNote(context, note);
     } catch (e) {
-      if (mounted) showNote(context, 'Не удалось сохранить QR-код: $e');
+      if (mounted) showNote(context, tr('Не удалось сохранить QR-код: {0}', [e]));
     }
   }
 
@@ -651,7 +701,7 @@ class _ServerSheetState extends State<_ServerSheet> {
         port == null ||
         port < 1 ||
         port > 65535) {
-      setState(() => _issueError = 'Укажите логин, пароль и порт SSH.');
+      setState(() => _issueError = tr('Укажите логин, пароль и порт SSH.'));
       return;
     }
     await state.rememberCredentials(InstallRequest(
@@ -679,7 +729,7 @@ class _ServerSheetState extends State<_ServerSheet> {
       final conf = await widget.state.issueDeviceConf(server);
       if (mounted) setState(() => _issuedConf = conf);
     } catch (e) {
-      if (mounted) setState(() => _issueError = 'Не удалось выпустить ключ: $e');
+      if (mounted) setState(() => _issueError = tr('Не удалось выпустить ключ: {0}', [e]));
     } finally {
       if (mounted) setState(() => _issuing = false);
     }
@@ -692,7 +742,7 @@ class _ServerSheetState extends State<_ServerSheet> {
     if (server == null) return const SizedBox(height: 20);
 
     Widget back() => CvButton(
-          label: 'Назад',
+          label: tr('Назад'),
           onTap: () => setState(() => _view = _SheetView.menu),
         );
 
@@ -709,14 +759,14 @@ class _ServerSheetState extends State<_ServerSheet> {
           const SizedBox(height: 10),
           _ActionRow(
             icon: Icons.edit_outlined,
-            title: 'Изменить название и место',
+            title: tr('Изменить название и место'),
             note: '',
             onTap: () => setState(() => _view = _SheetView.edit),
           ),
           _ActionRow(
             icon: Icons.ios_share,
-            title: 'Поделиться',
-            note: 'QR-кодом, файлом .conf или текстом',
+            title: tr('Поделиться'),
+            note: tr('QR-кодом, файлом .conf или текстом'),
             // Новый ключ на каждое открытие: при быстром «Назад» и снова
             // «Поделиться» старая и новая панели недолго живут вместе.
             onTap: () => setState(() {
@@ -727,16 +777,18 @@ class _ServerSheetState extends State<_ServerSheet> {
           if (state.canIssueKey(server))
             _ActionRow(
               icon: Icons.key_off_outlined,
-              title: 'Забыть пароль сервера',
-              note: 'Сейчас он сохранён на этом компьютере',
+              title: tr('Забыть пароль сервера'),
+              note: Platform.isWindows
+                  ? tr('Сейчас он сохранён на этом компьютере')
+                  : tr('Сейчас приложение его помнит'),
               onTap: () async {
                 await state.forgetCredentials(server.profile.host);
-                if (mounted) showNote(context, 'Пароль сервера забыт');
+                if (mounted) showNote(context, tr('Пароль сервера забыт'));
               },
             ),
           _ActionRow(
             icon: Icons.delete_outline,
-            title: 'Удалить сервер',
+            title: tr('Удалить сервер'),
             note: '',
             danger: true,
             onTap: () => setState(() => _view = _SheetView.delete),
@@ -745,21 +797,21 @@ class _ServerSheetState extends State<_ServerSheet> {
         break;
       case _SheetView.edit:
         body = [
-          const SheetHeader(title: 'Изменить сервер'),
+          SheetHeader(title: tr('Изменить сервер')),
           const SizedBox(height: 14),
-          CvField(controller: _name, label: 'Название'),
+          CvField(controller: _name, label: tr('Название')),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: CvField(controller: _country, label: 'Страна')),
+              Expanded(child: CvField(controller: _country, label: tr('Страна'))),
               const SizedBox(width: 10),
-              Expanded(child: CvField(controller: _city, label: 'Город')),
+              Expanded(child: CvField(controller: _city, label: tr('Город'))),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            'Место определяется по адресу сервера автоматически. Если оно '
-            'определилось неверно, поправьте его здесь.',
+            tr('Место определяется по адресу сервера автоматически. Если оно '
+            'определилось неверно, поправьте его здесь.'),
             style: tx(12, c: C.muted, h: 1.45),
           ),
           const SizedBox(height: 14),
@@ -769,7 +821,7 @@ class _ServerSheetState extends State<_ServerSheet> {
               const SizedBox(width: 10),
               Expanded(
                 child: CvButton(
-                  label: 'Сохранить',
+                  label: tr('Сохранить'),
                   kind: CvButtonKind.primary,
                   onTap: () async {
                     await state.updateServer(
@@ -792,7 +844,7 @@ class _ServerSheetState extends State<_ServerSheet> {
         // В самый плотный QR-код помещается чуть меньше 3000 байт.
         final fitsQr = utf8.encode(conf).length <= 2900;
         body = [
-          SheetHeader(title: 'Поделиться', subtitle: server.name),
+          SheetHeader(title: tr('Поделиться'), subtitle: server.name),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(12),
@@ -809,13 +861,13 @@ class _ServerSheetState extends State<_ServerSheet> {
             ),
             child: Text(
               issued == null
-                  ? 'Это конфиг вашего устройства. Два устройства не могут '
+                  ? tr('Это конфиг вашего устройства. Два устройства не могут '
                       'пользоваться им одновременно: связь будет рваться у '
                       'обоих. В конфиге есть ключ доступа — передавайте его '
-                      'только тем, кому доверяете.'
-                  : 'Это отдельный ключ: им можно пользоваться одновременно '
+                      'только тем, кому доверяете.')
+                  : tr('Это отдельный ключ: им можно пользоваться одновременно '
                       'с этим устройством. Передавайте его только тем, кому '
-                      'доверяете.',
+                      'доверяете.'),
               style: tx(
                 13,
                 c: issued == null ? C.warnText : const Color(0xFFC9F7EE),
@@ -839,7 +891,7 @@ class _ServerSheetState extends State<_ServerSheet> {
                           flex: 3,
                           child: CvField(
                             controller: _login,
-                            label: 'Логин',
+                            label: tr('Логин'),
                             enabled: !_issuing,
                           ),
                         ),
@@ -848,7 +900,7 @@ class _ServerSheetState extends State<_ServerSheet> {
                           flex: 2,
                           child: CvField(
                             controller: _sshPort,
-                            label: 'Порт SSH',
+                            label: tr('Порт SSH'),
                             mono: true,
                             enabled: !_issuing,
                             keyboardType: TextInputType.number,
@@ -859,11 +911,13 @@ class _ServerSheetState extends State<_ServerSheet> {
                     const SizedBox(height: 10),
                     CvField(
                       controller: _pass,
-                      label: 'Пароль от сервера ${server.profile.host}',
+                      label: tr('Пароль от сервера {0}', [server.profile.host]),
                       obscure: true,
                       enabled: !_issuing,
-                      helper: 'Приложение запомнит его и сохранит на этом '
-                          'компьютере в зашифрованном виде',
+                      helper: Platform.isWindows
+                          ? tr('Приложение запомнит его и сохранит на этом '
+                              'компьютере в зашифрованном виде')
+                          : tr('Приложение запомнит его до закрытия'),
                     ),
                   ],
                 ),
@@ -871,18 +925,18 @@ class _ServerSheetState extends State<_ServerSheet> {
             ),
             CvButton(
               label: _issuing
-                  ? 'Выпускаю ключ…'
+                  ? tr('Выпускаю ключ…')
                   : (_askCreds && !state.canIssueKey(server)
-                      ? 'Сохранить и выпустить ключ'
-                      : 'Выпустить отдельный ключ'),
+                      ? tr('Сохранить и выпустить ключ')
+                      : tr('Выпустить отдельный ключ')),
               icon: Icons.vpn_key_outlined,
               kind: CvButtonKind.primary,
               onTap: _issuing ? null : () => _issuePressed(server),
             ),
             const SizedBox(height: 6),
             Text(
-              'Для другого устройства или друга. Связь с сервером прервётся '
-              'на несколько секунд.',
+              tr('Для другого устройства или друга. Связь с сервером прервётся '
+              'на несколько секунд.'),
               textAlign: TextAlign.center,
               style: tx(12, c: C.muted, h: 1.45),
             ),
@@ -906,13 +960,13 @@ class _ServerSheetState extends State<_ServerSheet> {
                     size: 260,
                     padding: EdgeInsets.zero,
                     backgroundColor: Colors.white,
-                    semanticsLabel: 'QR-код с конфигом сервера',
+                    semanticsLabel: tr('QR-код с конфигом сервера'),
                     errorStateBuilder: (context, error) => SizedBox(
                       width: 260,
                       height: 80,
                       child: Center(
                         child: Text(
-                          'Не удалось построить QR-код',
+                          tr('Не удалось построить QR-код'),
                           style: tx(13, c: const Color(0xFF101010)),
                         ),
                       ),
@@ -923,8 +977,8 @@ class _ServerSheetState extends State<_ServerSheet> {
             )
           else
             Text(
-              'Конфиг слишком длинный для QR-кода — передайте его файлом '
-              'или текстом.',
+              tr('Конфиг слишком длинный для QR-кода — передайте его файлом '
+              'или текстом.'),
               textAlign: TextAlign.center,
               style: tx(13, c: C.muted, h: 1.45),
             ),
@@ -933,14 +987,14 @@ class _ServerSheetState extends State<_ServerSheet> {
             children: [
               Expanded(
                 child: CvButton(
-                  label: 'Сохранить QR-код',
+                  label: tr('Сохранить QR-код'),
                   onTap: fitsQr ? () => _saveQr(server) : null,
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: CvButton(
-                  label: 'Сохранить .conf',
+                  label: tr('Сохранить .conf'),
                   onTap: () => _saveFile(server, conf),
                 ),
               ),
@@ -948,9 +1002,9 @@ class _ServerSheetState extends State<_ServerSheet> {
           ),
           const SizedBox(height: 10),
           CvButton(
-            label: 'Скопировать текстом',
+            label: tr('Скопировать текстом'),
             icon: Icons.copy,
-            onTap: () => copyText(context, conf, 'Конфиг скопирован'),
+            onTap: () => copyText(context, conf, tr('Конфиг скопирован')),
           ),
           const SizedBox(height: 10),
           back(),
@@ -958,14 +1012,14 @@ class _ServerSheetState extends State<_ServerSheet> {
         break;
       case _SheetView.delete:
         body = [
-          SheetHeader(title: 'Удалить сервер', subtitle: server.name),
+          SheetHeader(title: tr('Удалить сервер'), subtitle: server.name),
           const SizedBox(height: 12),
           DangerConfirm(
-            question: 'Удалить сервер «${server.name}» из приложения?',
-            note: 'Сам сервер останется настроенным. Чтобы вернуть его в '
-                'приложение, понадобится конфиг или повторная установка.',
-            cancelLabel: 'Не удалять',
-            confirmLabel: 'Удалить',
+            question: tr('Удалить сервер «{0}» из приложения?', [server.name]),
+            note: tr('Сам сервер останется настроенным. Чтобы вернуть его в '
+                'приложение, понадобится конфиг или повторная установка.'),
+            cancelLabel: tr('Не удалять'),
+            confirmLabel: tr('Удалить'),
             onCancel: () => setState(() => _view = _SheetView.menu),
             onConfirm: () async {
               await state.deleteServer(server.id);

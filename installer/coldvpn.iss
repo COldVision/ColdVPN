@@ -26,6 +26,16 @@ ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist
 OutputBaseFilename=ColdVPN-Setup-{#AppVersion}
 SetupIconFile=..\assets\app_icon.ico
+; Pictures inside the wizard: without them Inno Setup shows its own.
+WizardImageFile=wizard.bmp
+WizardSmallImageFile=wizard_small.bmp
+; What Windows shows in the file properties and in the administrator prompt.
+VersionInfoVersion={#AppVersion}
+VersionInfoProductName={#AppName}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoDescription={#AppName} Setup
+VersionInfoCompany=ColdVision
+VersionInfoCopyright=ColdVision
 UninstallDisplayIcon={app}\ColdVPN.exe
 UninstallDisplayName={#AppName}
 Compression=lzma2

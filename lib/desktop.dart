@@ -6,6 +6,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_state.dart';
+import 'l10n.dart';
 
 /// Окно и значок в области уведомлений Windows: сворачивание в трей при
 /// закрытии, меню значка и корректный выход.
@@ -16,6 +17,7 @@ class DesktopShell with TrayListener, WindowListener {
   bool _tray = false;
   bool _quitting = false;
   VpnStatus? _menuStatus;
+  String _menuLang = appLang;
 
   static bool get supported => Platform.isWindows;
 
@@ -37,7 +39,7 @@ class DesktopShell with TrayListener, WindowListener {
       state.addListener(_onStateChanged);
       _tray = true;
     } catch (e) {
-      state.addLog('Значок в трее недоступен: $e');
+      state.addLog(tr('Значок в трее недоступен: {0}', [e]));
     }
 
     if (startHidden && _tray && state.settings.closeToTray) {
@@ -50,29 +52,32 @@ class DesktopShell with TrayListener, WindowListener {
   }
 
   void _onStateChanged() {
-    if (state.status != _menuStatus) unawaited(_updateMenu());
+    if (state.status != _menuStatus || appLang != _menuLang) {
+      unawaited(_updateMenu());
+    }
   }
 
   Future<void> _updateMenu() async {
     _menuStatus = state.status;
+    _menuLang = appLang;
     try {
       await trayManager.setContextMenu(
         Menu(
           items: [
-            MenuItem(key: 'show', label: 'Открыть ColdVPN'),
+            MenuItem(key: 'show', label: tr('Открыть ColdVPN')),
             MenuItem(
               key: 'toggle',
               label: state.status == VpnStatus.off
-                  ? 'Включить VPN'
-                  : 'Выключить VPN',
+                  ? tr('Включить VPN')
+                  : tr('Выключить VPN'),
             ),
             MenuItem.separator(),
-            MenuItem(key: 'quit', label: 'Выход'),
+            MenuItem(key: 'quit', label: tr('Выход')),
           ],
         ),
       );
       await trayManager.setToolTip(
-        state.status == VpnStatus.on ? 'ColdVPN — включён' : 'ColdVPN',
+        state.status == VpnStatus.on ? tr('ColdVPN — включён') : 'ColdVPN',
       );
     } catch (_) {}
   }

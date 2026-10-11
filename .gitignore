@@ -37,3 +37,6 @@ Thumbs.db
 desktop.ini
 *.log
 *.swp
+
+# Android: папку android/ создаёт tool\setup_android.ps1 из android_src/
+android/

@@ -24,6 +24,22 @@ final _obfuscationKey = RegExp(
   r'keepalivetimeout|maxhandshakeattempts|randomtrailers|disablecookies)$',
 );
 
+final _androidKey = RegExp(r'^(jc|jmin|jmax|s[1-4]|h[1-4]|i[1-5])$');
+
+/// Приводит диапазон к его началу: `1.2.3.4/24` → `1.2.3.0/24`. Android
+/// не принимает маршрут, у которого заданы биты после маски.
+String alignCidr(String cidr) {
+  final slash = cidr.indexOf('/');
+  if (slash < 0) return cidr;
+  final base = _ipv4ToInt(cidr.substring(0, slash));
+  final bits = int.tryParse(cidr.substring(slash + 1));
+  if (base == null || bits == null || bits < 0 || bits > 32) return cidr;
+  final mask = bits == 0 ? 0 : (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF;
+  final v = base & mask;
+  return '${(v >> 24) & 255}.${(v >> 16) & 255}.${(v >> 8) & 255}.'
+      '${v & 255}/$bits';
+}
+
 /// Собирает конфигурацию туннеля для клиента.
 ///
 /// В AllowedIPs попадают только [cidrs]: Windows добавит маршруты ровно для
@@ -35,13 +51,19 @@ String buildClientConf(
   ServerProfile server,
   Iterable<String> cidrs, {
   String? dns,
+  List<String> includedApps = const [],
+  bool androidOnly = false,
 }) {
   final routes = allowedIps(cidrs);
+  // Библиотека туннеля для Android отвергает конфиг с незнакомыми ей
+  // ключами, поэтому туда идут только известные параметры маскировки.
+  bool accepted(String key) =>
+      !androidOnly || _androidKey.hasMatch(key.toLowerCase());
   final params = <String>[
     for (final key in _obfuscationOrder)
       if (server.obfuscation[key] != null) '$key = ${server.obfuscation[key]}',
     for (final entry in server.obfuscation.entries)
-      if (!_obfuscationOrder.contains(entry.key))
+      if (!_obfuscationOrder.contains(entry.key) && accepted(entry.key))
         '${entry.key} = ${entry.value}',
   ];
   final endpoint =
@@ -52,6 +74,9 @@ String buildClientConf(
     'Address = ${server.clientAddress}/32',
     'MTU = 1280',
     if (dns != null) 'DNS = $dns',
+    // Только на Android: через VPN идут лишь перечисленные приложения.
+    if (includedApps.isNotEmpty)
+      'IncludedApplications = ${includedApps.join(', ')}',
     ...params,
     '',
     '[Peer]',

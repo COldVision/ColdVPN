@@ -6,6 +6,7 @@ import 'server_tab.dart';
 import 'services_tab.dart';
 import 'settings_tab.dart';
 import 'theme.dart';
+import '../l10n.dart';
 
 /// Каркас приложения: четыре вкладки и нижняя навигация.
 class Shell extends StatefulWidget {
@@ -19,6 +20,32 @@ class Shell extends StatefulWidget {
 
 class _ShellState extends State<Shell> {
   int _tab = 0;
+  String _lang = appLang;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.state.addListener(_onState);
+  }
+
+  @override
+  void dispose() {
+    widget.state.removeListener(_onState);
+    super.dispose();
+  }
+
+  /// После смены языка перестраивает всё дерево: неизменяемые (const)
+  /// виджеты сами бы не обновились и остались на прежнем языке.
+  void _onState() {
+    if (_lang == appLang) return;
+    _lang = appLang;
+    void visit(Element element) {
+      element.markNeedsBuild();
+      element.visitChildren(visit);
+    }
+
+    WidgetsBinding.instance.rootElement?.visitChildren(visit);
+  }
 
   void _go(int tab) => setState(() => _tab = tab);
 
@@ -111,11 +138,11 @@ class _NavBar extends StatelessWidget {
   final int current;
   final ValueChanged<int> onSelect;
 
-  static const _items = [
-    (Icons.tune, 'Сервисы'),
-    (Icons.dns_outlined, 'Сервер'),
-    (Icons.description_outlined, 'Журнал'),
-    (Icons.settings_outlined, 'Настройки'),
+  static List<(IconData, String)> get _items => [
+    (Icons.tune, tr('Сервисы')),
+    (Icons.dns_outlined, tr('Сервер')),
+    (Icons.description_outlined, tr('Журнал')),
+    (Icons.settings_outlined, tr('Настройки')),
   ];
 
   @override
@@ -247,7 +274,7 @@ class ServerPicker extends StatelessWidget {
     final current = state.current;
     final on = state.status == VpnStatus.on;
     return PopupMenuButton<String>(
-      tooltip: 'Выбрать сервер',
+      tooltip: tr('Выбрать сервер'),
       color: C.menu,
       offset: const Offset(0, 50),
       shape: RoundedRectangleBorder(
@@ -304,7 +331,7 @@ class ServerPicker extends StatelessWidget {
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  'Добавить или изменить серверы',
+                  tr('Добавить или изменить серверы'),
                   style: tx(14, c: C.link),
                 ),
               ),
@@ -335,7 +362,7 @@ class ServerPicker extends StatelessWidget {
             const SizedBox(width: 8),
             Flexible(
               child: Text(
-                current?.name ?? 'Нет сервера',
+                current?.name ?? tr('Нет сервера'),
                 overflow: TextOverflow.ellipsis,
                 style: tx(14, w: w600, c: C.white),
               ),
@@ -353,15 +380,15 @@ class ServerPicker extends StatelessWidget {
 String formatRate(double bytesPerSecond) {
   final bits = bytesPerSecond * 8;
   if (bits >= 1e6) {
-    return '${(bits / 1e6).toStringAsFixed(1).replaceAll('.', ',')} Мбит/с';
+    return tr('{0} Мбит/с', [decimal(bits / 1e6)]);
   }
-  return '${(bits / 1e3).round()} Кбит/с';
+  return tr('{0} Кбит/с', [(bits / 1e3).round()]);
 }
 
 /// Объём данных: «1,4 ГБ».
 String formatBytes(int bytes) {
-  String fixed(double v) => v.toStringAsFixed(1).replaceAll('.', ',');
-  if (bytes >= 1 << 30) return '${fixed(bytes / (1 << 30))} ГБ';
-  if (bytes >= 1 << 20) return '${fixed(bytes / (1 << 20))} МБ';
-  return '${(bytes / 1024).round()} КБ';
+  String fixed(double v) => decimal(v);
+  if (bytes >= 1 << 30) return tr('{0} ГБ', [fixed(bytes / (1 << 30))]);
+  if (bytes >= 1 << 20) return tr('{0} МБ', [fixed(bytes / (1 << 20))]);
+  return tr('{0} КБ', [(bytes / 1024).round()]);
 }

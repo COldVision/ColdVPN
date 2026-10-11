@@ -1,8 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:split_vpn/l10n.dart';
 import 'package:split_vpn/route_input.dart';
 
 void main() {
+  // Тексты проверяются по-русски, каким бы ни был язык системы.
+  setUp(() => appLang = 'ru');
+
   test('строки своего маршрута распознаются', () {
     expect(parseRouteLine('portal.example.com').kind, RouteLineKind.domain);
     final link = parseRouteLine('https://Wiki.Example.org/start?x=1');
@@ -37,5 +41,16 @@ void main() {
     expect(plural(3, 'домен', 'домена', 'доменов'), '3 домена');
     expect(plural(11, 'домен', 'домена', 'доменов'), '11 доменов');
     expect(plural(25, 'домен', 'домена', 'доменов'), '25 доменов');
+  });
+
+  test('английский: перевод, подстановки и две формы числа', () {
+    appLang = 'en';
+    expect(tr('Включено {0} из {1}', [2, 5]), 'On: 2 of 5');
+    expect(tr('строки без перевода остаются как есть'),
+        'строки без перевода остаются как есть');
+    expect(plural(1, 'domain', 'domains', 'domains'), '1 domain');
+    expect(plural(21, 'domain', 'domains', 'domains'), '21 domains');
+    expect(trLoose('ошибка туннеля: X'), 'tunnel error: X');
+    expect(parseRouteLine('1.2.3.0/24').note, '256 addresses');
   });
 }

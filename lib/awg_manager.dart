@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'awg_config.dart';
+import 'l10n.dart';
 
 class TunnelException implements Exception {
   TunnelException(this.message);
@@ -63,28 +64,28 @@ class AwgManager {
   Future<void> ensureInstalled() async {
     if (isInstalled) return;
     await dir.create(recursive: true);
-    onLog('Скачиваю клиент AmneziaWG $_clientVersion (около 3,5 МБ)…');
+    onLog(tr('Скачиваю клиент AmneziaWG {0} (около 3,5 МБ)…', [_clientVersion]));
     final msi = File('${dir.path}\\amneziawg.msi');
     final http = HttpClient()..connectionTimeout = const Duration(seconds: 20);
     try {
       final request = await http.getUrl(Uri.parse(_msiUrl));
       final response = await request.close();
       if (response.statusCode != 200) {
-        throw TunnelException('GitHub ответил кодом ${response.statusCode}');
+        throw TunnelException(tr('GitHub ответил кодом {0}', [response.statusCode]));
       }
       await response.pipe(msi.openWrite());
     } on TunnelException {
       rethrow;
     } catch (e) {
       throw TunnelException(
-        'Не удалось скачать клиент AmneziaWG: $e\n'
-        'Его можно установить вручную: $_msiUrl',
+        tr('Не удалось скачать клиент AmneziaWG: {0}\n'
+        'Его можно установить вручную: {1}', [e, _msiUrl]),
       );
     } finally {
       http.close(force: true);
     }
 
-    onLog('Устанавливаю клиент AmneziaWG…');
+    onLog(tr('Устанавливаю клиент AmneziaWG…'));
     final install = await Process.run('msiexec', [
       '/i',
       msi.path,
@@ -95,14 +96,14 @@ class AwgManager {
     // 3010 — установка прошла, но Windows просит перезагрузку.
     if ((install.exitCode != 0 && install.exitCode != 3010) || !isInstalled) {
       throw TunnelException(
-        'Установка клиента AmneziaWG не удалась (код ${install.exitCode}). '
-        'Установите его вручную: $_msiUrl',
+        tr('Установка клиента AmneziaWG не удалась (код {0}). '
+        'Установите его вручную: {1}', [install.exitCode, _msiUrl]),
       );
     }
     try {
       await msi.delete();
     } catch (_) {}
-    onLog('Клиент AmneziaWG установлен.');
+    onLog(tr('Клиент AmneziaWG установлен.'));
   }
 
   /// Поднимает туннель с указанным конфигом (прежний при этом снимается).
@@ -116,8 +117,8 @@ class AwgManager {
     );
     if (result.exitCode != 0) {
       throw TunnelException(
-        'Служба туннеля не запустилась (код ${result.exitCode}): '
-        '${'${result.stdout}${result.stderr}'.trim()}',
+        tr('Служба туннеля не запустилась (код {0}): '
+        '{1}', [result.exitCode, '${result.stdout}${result.stderr}'.trim()]),
       );
     }
   }
@@ -331,8 +332,8 @@ class AwgManager {
   Future<List<String>> clientLog({int lines = 60}) async {
     if (!_client.existsSync()) {
       return [
-        'Клиент AmneziaWG ещё не установлен: он ставится при первом нажатии '
-            '«Подключить».',
+        tr('Клиент AmneziaWG ещё не установлен: он ставится при первом нажатии '
+            '«Подключить».'),
       ];
     }
     try {
@@ -345,7 +346,7 @@ class AwgManager {
           .toList();
       return all.length > lines ? all.sublist(all.length - lines) : all;
     } catch (e) {
-      return ['Не удалось прочитать журнал клиента: $e'];
+      return [tr('Не удалось прочитать журнал клиента: {0}', [e])];
     }
   }
 }
