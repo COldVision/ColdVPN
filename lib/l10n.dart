@@ -1152,6 +1152,10 @@ const _en = <String, String>{
       'the config was rejected',
   'Язык':
       'Language',
+  'Купить подписку':
+      'Buy a subscription',
+  'Страница оплаты откроется в браузере':
+      'The payment page opens in the browser',
   'Перетащите на нужное место или на другой раздел':
       'Drag to a new place or onto another section',
 };

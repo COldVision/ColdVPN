@@ -62,4 +62,14 @@ class AndroidTunnel {
           AndroidApp('${item['package']}', '${item['label']}'),
     ];
   }
+
+  /// Открывает ссылку в браузере телефона. false — открыть нечем.
+  static Future<bool> openUrl(String url) async {
+    try {
+      return await _channel.invokeMethod<bool>('openUrl', {'url': url}) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

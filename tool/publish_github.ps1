@@ -48,8 +48,12 @@ try {
     if ($count -eq 0) {
         Write-Host 'Nothing new to commit.'
     } else {
-        $message = Read-Host 'Commit message (Enter = "ColdVPN 0.1.0")'
-        if (-not $message) { $message = 'ColdVPN 0.1.0' }
+        # The default message carries the version from pubspec.yaml.
+        $default = 'ColdVPN'
+        $found = Select-String -Path (Join-Path $project 'pubspec.yaml') -Pattern '^version:\s*([0-9.]+)' | Select-Object -First 1
+        if ($found) { $default = 'ColdVPN ' + $found.Matches[0].Groups[1].Value }
+        $message = Read-Host "Commit message (Enter = `"$default`")"
+        if (-not $message) { $message = $default }
         git commit -m $message
         if ($LASTEXITCODE -ne 0) { throw 'git commit failed' }
     }

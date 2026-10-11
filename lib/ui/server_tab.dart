@@ -30,6 +30,9 @@ XTypeGroup get _pngFiles => XTypeGroup(label: tr('Картинка PNG'), extens
 String get _notConf => tr('Не похоже на конфиг AmneziaWG: нужны секции [Interface] '
     '(PrivateKey, Address) и [Peer] (PublicKey, Endpoint).');
 
+/// Страница, где продаётся подписка на готовый сервер.
+const subscriptionUrl = 'https://boosty.to/coldvisionx';
+
 /// Вкладка «Сервер»: выбранный сервер, список серверов и добавление.
 class ServerTab extends StatelessWidget {
   const ServerTab({super.key, required this.state});
@@ -177,6 +180,10 @@ class ServerTab extends StatelessWidget {
                 padding: const EdgeInsets.all(6),
                 child: Column(
                   children: [
+                    _SubscribeButton(
+                      onTap: () => openLink(context, subscriptionUrl),
+                    ),
+                    const SizedBox(height: 4),
                     _ActionRow(
                       icon: Icons.cloud_upload_outlined,
                       title: tr('Установить на свой VPS'),
@@ -184,10 +191,13 @@ class ServerTab extends StatelessWidget {
                       onTap: () => showInstallSheet(context, state),
                     ),
                     _ActionRow(
-                      icon: Icons.insert_drive_file_outlined,
-                      title: tr('Импорт из файла .conf'),
-                      note: tr('Готовый конфиг AmneziaWG'),
-                      onTap: () => _importFile(context),
+                      icon: Icons.content_paste,
+                      title: tr('Вставить конфиг текстом'),
+                      note: tr('Например, из сообщения'),
+                      onTap: () => showCvSheet<void>(
+                        context,
+                        builder: (_) => _PasteSheet(state: state),
+                      ),
                     ),
                     _ActionRow(
                       icon: Icons.qr_code,
@@ -198,13 +208,10 @@ class ServerTab extends StatelessWidget {
                       onTap: () => _importQr(context),
                     ),
                     _ActionRow(
-                      icon: Icons.content_paste,
-                      title: tr('Вставить конфиг текстом'),
-                      note: tr('Например, из сообщения'),
-                      onTap: () => showCvSheet<void>(
-                        context,
-                        builder: (_) => _PasteSheet(state: state),
-                      ),
+                      icon: Icons.insert_drive_file_outlined,
+                      title: tr('Импорт из файла .conf'),
+                      note: tr('Готовый конфиг AmneziaWG'),
+                      onTap: () => _importFile(context),
                     ),
                   ],
                 ),
@@ -420,6 +427,69 @@ class _ServerRow extends StatelessWidget {
           ),
           const SizedBox(width: 4),
         ],
+      ),
+    );
+  }
+}
+
+/// Кнопка «Купить подписку»: залита цветом, чтобы выделяться среди
+/// остальных способов добавить сервер.
+class _SubscribeButton extends StatelessWidget {
+  const _SubscribeButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [C.accentA, C.violet]),
+          borderRadius: BorderRadius.circular(13),
+          border: Border.all(color: const Color.fromRGBO(190, 175, 255, 0.8)),
+        ),
+        // Свой слой Material: иначе отклик на нажатие рисуется под заливкой.
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(13),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 60),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.workspace_premium_outlined,
+                      size: 22, color: C.white),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          tr('Купить подписку'),
+                          style: tx(15, w: w700, c: C.white),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            tr('Страница оплаты откроется в браузере'),
+                            style: tx(12, c: const Color(0xFFE6E2FF), h: 1.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.open_in_new, size: 18, color: C.white),
+                ],
+              ),
+            ),
+          ),
+        ),
+        ),
       ),
     );
   }

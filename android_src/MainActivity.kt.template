@@ -57,6 +57,16 @@ class MainActivity : FlutterActivity() {
             "isUp" -> background(result) { isUp() }
             "stats" -> background(result) { stats() }
             "apps" -> background(result) { apps() }
+            "openUrl" -> {
+                // Opens a link in the browser; false when nothing can open it.
+                try {
+                    val link = android.net.Uri.parse(call.argument<String>("url"))
+                    startActivity(Intent(Intent.ACTION_VIEW, link).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.success(false)
+                }
+            }
             else -> result.notImplemented()
         }
     }

@@ -10,7 +10,7 @@ import 'theme.dart';
 import '../l10n.dart';
 
 const repositoryUrl = 'https://github.com/ColdVision/ColdVPN';
-const appVersion = '0.1.0';
+const appVersion = '0.1.1';
 
 XTypeGroup get _settingsFiles =>
     XTypeGroup(label: tr('Настройки ColdVPN'), extensions: ['json']);
@@ -131,15 +131,7 @@ class _SettingsTabState extends State<SettingsTab> {
         '{3}:{4}', [two(at.day), two(at.month), at.year, two(at.hour), two(at.minute)]);
   }
 
-  Future<void> _openRepository() async {
-    try {
-      if (Platform.isWindows) {
-        await Process.run('explorer', [repositoryUrl]);
-        return;
-      }
-    } catch (_) {}
-    if (mounted) await copyText(context, repositoryUrl, tr('Ссылка скопирована'));
-  }
+  Future<void> _openRepository() => openLink(context, repositoryUrl);
 
   @override
   Widget build(BuildContext context) {

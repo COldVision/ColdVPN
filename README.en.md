@@ -18,7 +18,7 @@ A VPN client built on AmneziaWG with split tunnelling: the app installs a VPN
 server on your own VPS and sends only the services you choose through it.
 Everything else goes directly through your provider.
 
-Current version: **0.1.0**, for **Windows 10/11 (x64)** and **Android 8.0+**.
+Current version: **0.1.1**, for **Windows 10/11 (x64)** and **Android 8.0+**.
 
 ## Features
 

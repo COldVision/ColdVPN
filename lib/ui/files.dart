@@ -3,7 +3,29 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/widgets.dart';
 import 'package:share_plus/share_plus.dart';
+
+import '../android_tunnel.dart';
+import '../l10n.dart';
+import 'theme.dart';
+
+/// Открывает ссылку в браузере. Если открыть не удалось, копирует её в
+/// буфер обмена и сообщает об этом.
+Future<void> openLink(BuildContext context, String url) async {
+  var opened = false;
+  try {
+    if (Platform.isWindows) {
+      await Process.run('explorer', [url]);
+      opened = true;
+    } else if (Platform.isAndroid) {
+      opened = await AndroidTunnel.openUrl(url);
+    }
+  } catch (_) {}
+  if (!opened && context.mounted) {
+    await copyText(context, url, tr('Ссылка скопирована'));
+  }
+}
 
 /// Сохраняет файл так, как принято на платформе.
 ///
