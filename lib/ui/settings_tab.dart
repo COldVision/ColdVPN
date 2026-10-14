@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import 'files.dart';
+import 'guide_page.dart';
 import 'shell.dart';
 import 'theme.dart';
 import '../l10n.dart';
 
 const repositoryUrl = 'https://github.com/ColdVision/ColdVPN';
-const appVersion = '0.1.1';
+const appVersion = '0.1.3';
 
 XTypeGroup get _settingsFiles =>
     XTypeGroup(label: tr('Настройки ColdVPN'), extensions: ['json']);
@@ -167,10 +168,23 @@ class _SettingsTabState extends State<SettingsTab> {
                     if (Platform.isWindows)
                     _SwitchRow(
                       title: tr('Запускать вместе с системой'),
-                      note: tr('При входе в Windows, сразу в трей'),
+                      note: tr('При входе в Windows'),
                       value: state.autostart,
                       onChanged: state.platformSupported
                           ? (value) => state.setAutostart(value)
+                          : null,
+                    ),
+                    if (Platform.isWindows)
+                    _SwitchRow(
+                      title: tr('Запускать в свёрнутом режиме'),
+                      note: tr('Окно не открывается — приложение сразу уходит '
+                          'в трей. Открыть — щелчком по значку'),
+                      value: settings.startInTray,
+                      onChanged: state.platformSupported
+                          ? (value) => state.changeSettings(
+                                (s) => s.startInTray = value,
+                                reconnect: false,
+                              )
                           : null,
                     ),
                     _SwitchRow(
@@ -387,8 +401,26 @@ class _SettingsTabState extends State<SettingsTab> {
                   ),
                 ),
               ),
+              if (Platform.isWindows) ...[
+                const SizedBox(height: 8),
+                SectionTitle(tr('Расширение для браузера')),
+                const SizedBox(height: 8),
+                _BrowserCard(state: state),
+              ],
               const SizedBox(height: 8),
               SectionTitle(tr('О программе')),
+              const SizedBox(height: 8),
+              CvCard(
+                padding: const EdgeInsets.all(6),
+                child: ActionLine(
+                  title: tr('Инструкция'),
+                  note: tr('Как работает приложение и как пользоваться всеми '
+                      'его функциями'),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const GuidePage()),
+                  ),
+                ),
+              ),
               const SizedBox(height: 8),
               CvCard(
                 child: Column(
@@ -459,6 +491,80 @@ class _SwitchRow extends StatelessWidget {
             ),
           ),
           CvSwitch(value: value, label: title, onChanged: onChanged),
+        ],
+      ),
+    );
+  }
+}
+
+/// Код для расширения и папка, из которой его ставят в Chrome.
+class _BrowserCard extends StatelessWidget {
+  const _BrowserCard({required this.state});
+
+  final AppState state;
+
+  String get _folder =>
+      '${File(Platform.resolvedExecutable).parent.path}\\chrome_extension';
+
+  @override
+  Widget build(BuildContext context) {
+    final status = switch (state.browserStatus) {
+      VpnStatus.on => tr('Сейчас VPN в браузере включён'),
+      VpnStatus.connecting => tr('VPN в браузере включается…'),
+      VpnStatus.off => state.browserError ?? tr('Сейчас VPN в браузере выключен'),
+    };
+    return CvCard(
+      padding: const EdgeInsets.all(6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 4, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(tr('Код для расширения'),
+                          style: tx(14, w: w600, c: C.white)),
+                      const SizedBox(height: 4),
+                      SelectableText(
+                        state.browserKey,
+                        style: tx(20, w: w700, c: C.tealText, mono: true),
+                      ),
+                    ],
+                  ),
+                ),
+                CvLink(
+                  label: tr('Скопировать'),
+                  onTap: () =>
+                      copyText(context, state.browserKey, tr('Код скопирован')),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+            child: Text(status, style: tx(12, c: C.muted, h: 1.4)),
+          ),
+          ActionLine(
+            title: tr('Открыть папку расширения'),
+            note: tr('В Chrome: «Расширения» → «Режим разработчика» → '
+                '«Загрузить распакованное» и выберите эту папку'),
+            onTap: () async {
+              if (Directory(_folder).existsSync()) {
+                await Process.run('explorer', [_folder]);
+              } else if (context.mounted) {
+                showNote(context, tr('Папка расширения не найдена: {0}', [_folder]));
+              }
+            },
+          ),
+          ActionLine(
+            title: tr('Сменить код'),
+            note: tr('Расширения со старым кодом перестанут управлять приложением'),
+            onTap: state.regenerateBrowserKey,
+          ),
         ],
       ),
     );

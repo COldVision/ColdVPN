@@ -18,7 +18,7 @@ A VPN client built on AmneziaWG with split tunnelling: the app installs a VPN
 server on your own VPS and sends only the services you choose through it.
 Everything else goes directly through your provider.
 
-Current version: **0.1.1**, for **Windows 10/11 (x64)** and **Android 8.0+**.
+Current version: **0.1.3**, for **Windows 10/11 (x64)** and **Android 8.0+**.
 
 ## Features
 
@@ -41,8 +41,11 @@ Current version: **0.1.1**, for **Windows 10/11 (x64)** and **Android 8.0+**.
 - **Diagnostics**: client, connection to the server, DNS, routes, service
   availability, speed, server state.
 - **Service list updates** straight from the source repositories.
-- Autostart, running from the tray, moving settings between devices.
+- Autostart, starting minimized, running from the tray, moving settings
+  between devices.
+- **Built-in guide** to every feature: Settings → About → User guide.
 - Interface in English and Russian; the language is switched in Settings.
+- **Chrome extension** (Windows): turns the VPN on for the browser only — for all sites or for your own list of favourites — and adds the site of the open tab to ColdVPN. It is loaded from the `chrome_extension` folder next to the app.
 
 ## Installation
 

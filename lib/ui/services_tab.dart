@@ -103,6 +103,10 @@ class _ServicesTabState extends State<ServicesTab> {
           show: state.error != null,
           child: _Banner(text: state.error ?? ''),
         ),
+        Reveal(
+          show: state.browserStatus != VpnStatus.off,
+          child: _BrowserNote(state: state),
+        ),
         if (state.isAndroid)
           // На Android три способа: сервисы по спискам адресов, выбранные
           // приложения целиком или весь трафик телефона.
@@ -331,6 +335,41 @@ class _AppRow extends StatelessWidget {
             onChanged: (value) => state.toggleApp(app.package, value),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Подсказка, что VPN включён расширением только для браузера.
+class _BrowserNote extends StatelessWidget {
+  const _BrowserNote({required this.state});
+
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final on = state.browserStatus == VpnStatus.on;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+      child: CvCard(
+        radius: 14,
+        padding: const EdgeInsets.all(12),
+        line: const Color.fromRGBO(88, 224, 200, 0.5),
+        child: Row(
+          children: [
+            Icon(Icons.public, size: 18, color: on ? C.teal : C.soft),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                on
+                    ? tr('VPN в браузере включён: сайты, выбранные в расширении '
+                        'ColdVPN, идут через VPN только в браузере.')
+                    : tr('Включаю VPN в браузере…'),
+                style: tx(13, c: C.white, h: 1.4),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

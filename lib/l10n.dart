@@ -1152,10 +1152,56 @@ const _en = <String, String>{
       'the config was rejected',
   'Язык':
       'Language',
-  'Купить подписку':
-      'Buy a subscription',
-  'Страница оплаты откроется в браузере':
-      'The payment page opens in the browser',
+  'Запускать в свёрнутом режиме':
+      'Start minimized',
+  'Окно не открывается — приложение сразу уходит в трей. Открыть — щелчком по значку':
+      'No window opens — the app goes straight to the tray. Click the icon to open it',
+  'При входе в Windows':
+      'At Windows sign-in',
+  'Инструкция':
+      'User guide',
+  'Как работает приложение и как пользоваться всеми его функциями':
+      'How the app works and how to use all of its features',
+  'Связь с расширением браузера недоступна (порт {0} занят): {1}':
+      'The browser extension link is unavailable (port {0} is busy): {1}',
+  'Это не похоже на домен.':
+      'This does not look like a domain.',
+  'VPN в браузере выключен.':
+      'Browser VPN turned off.',
+  'Поднимаю туннель AmneziaWG к {0}:{1} только для браузера…':
+      'Bringing up the AmneziaWG tunnel to {0}:{1} for the browser only…',
+  'Не удалось включить VPN в браузере: {0}':
+      'Could not turn on the browser VPN: {0}',
+  'VPN в браузере включён: прокси 127.0.0.1:{0}.':
+      'Browser VPN is on: proxy 127.0.0.1:{0}.',
+  'Расширение для браузера':
+      'Browser extension',
+  'Сейчас VPN в браузере включён':
+      'The browser VPN is on now',
+  'VPN в браузере включается…':
+      'The browser VPN is turning on…',
+  'Сейчас VPN в браузере выключен':
+      'The browser VPN is off now',
+  'Код для расширения':
+      'Code for the extension',
+  'Скопировать':
+      'Copy',
+  'Код скопирован':
+      'Code copied',
+  'Открыть папку расширения':
+      'Open the extension folder',
+  'В Chrome: «Расширения» → «Режим разработчика» → «Загрузить распакованное» и выберите эту папку':
+      'In Chrome: Extensions → Developer mode → Load unpacked, and choose this folder',
+  'Папка расширения не найдена: {0}':
+      'Extension folder not found: {0}',
+  'Сменить код':
+      'Change the code',
+  'Расширения со старым кодом перестанут управлять приложением':
+      'Extensions with the old code will stop controlling the app',
+  'VPN в браузере включён: сайты, выбранные в расширении ColdVPN, идут через VPN только в браузере.':
+      'Browser VPN is on: the sites chosen in the ColdVPN extension go through the VPN only in the browser.',
+  'Включаю VPN в браузере…':
+      'Turning on the browser VPN…',
   'Перетащите на нужное место или на другой раздел':
       'Drag to a new place or onto another section',
 };

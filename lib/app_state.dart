@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show PlatformException, rootBundle;
@@ -15,6 +16,7 @@ import 'list_updater.dart';
 import 'models.dart';
 import 'route_input.dart';
 import 'secret_store.dart';
+import 'socks_proxy.dart';
 import 'server_installer.dart';
 import 'l10n.dart';
 
@@ -463,7 +465,9 @@ class AppState extends ChangeNotifier {
       ..fullTunnel = s.fullTunnel
       ..appMode = s.appMode
       ..closeToTray = s.closeToTray
+      ..startInTray = s.startInTray
       ..language = s.language
+      ..browserKey = s.browserKey
       ..autoUpdateLists = s.autoUpdateLists
       ..dns = s.dns;
     // Пустое значение — язык ещё не выбирали: берётся язык системы.
@@ -727,8 +731,15 @@ class AppState extends ChangeNotifier {
   Future<void> selectServer(String id) async {
     if (id == current?.id) return;
     final wasOn = status != VpnStatus.off;
-    if (wasOn) await disconnect(remember: false);
     selectedServerId = id;
+    if (wasOn) {
+      await disconnect(remember: false);
+    } else if (browserOn) {
+      // Туннель для браузера переезжает на новый сервер.
+      await _closeBrowserPath();
+      browserStatus = VpnStatus.off;
+      unawaited(_resumeBrowser());
+    }
     await _save();
     notifyListeners();
     if (wasOn && canConnect) unawaited(connect());
@@ -1194,6 +1205,7 @@ class AppState extends ChangeNotifier {
     final run = ++_run;
     status = VpnStatus.connecting;
     error = null;
+    if (browserOn) browserStatus = VpnStatus.connecting;
     notifyListeners();
     try {
       await _tunnel.ensureInstalled();
@@ -1320,6 +1332,7 @@ class AppState extends ChangeNotifier {
       settings.wasOn = true;
       unawaited(_save());
       _startStats();
+      if (browserOn) await _openBrowserPath(profile);
       if (address == null) {
         error = tr('Туннель поднят, но проверочный запрос через него не прошёл. '
             'Сайты могут не открываться — запустите диагностику в журнале.');
@@ -1645,6 +1658,19 @@ class AppState extends ChangeNotifier {
       unawaited(_save());
     }
     notifyListeners();
+    // VPN в браузере живёт отдельно: туннель для него поднимается заново.
+    if (browserOn) {
+      browserStatus = VpnStatus.off;
+      unawaited(_resumeBrowser());
+    }
+  }
+
+  /// Полное выключение при выходе из приложения: и VPN, и VPN в браузере.
+  Future<void> shutdown() async {
+    browserOn = false;
+    _browserClients.clear();
+    await _closeBrowserPath();
+    await disconnect(remember: false);
   }
 
   void _fail(String message) {
@@ -1654,7 +1680,206 @@ class AppState extends ChangeNotifier {
     exitAddress = null;
     error = message;
     addLog(message);
+    if (browserOn) unawaited(_resumeBrowser());
   }
+
+  // ------------------------------------------------------ VPN в браузере
+
+  /// Порт SOCKS5-прокси для браузера (только 127.0.0.1).
+  static const browserProxyPort = 47320;
+
+  /// Нужен ли VPN в браузере: его просит хотя бы одно расширение.
+  bool browserOn = false;
+
+  /// Состояние VPN в браузере: включается расширением, независимо от
+  /// главной кнопки.
+  VpnStatus browserStatus = VpnStatus.off;
+  String? browserError;
+
+  SocksProxy? _socks;
+  Timer? _browserKeeper;
+  int _browserRun = 0;
+
+  /// Расширения, которые просят VPN: идентификатор → когда спрашивали.
+  /// Каждое расширение напоминает о себе раз в полминуты; закрытый браузер
+  /// перестаёт напоминать, и через пару минут VPN для него выключается.
+  final Map<String, DateTime> _browserClients = {};
+
+  /// Код для расширения; создаётся при первом обращении.
+  String get browserKey {
+    if (settings.browserKey.isEmpty) regenerateBrowserKey();
+    return settings.browserKey;
+  }
+
+  void regenerateBrowserKey() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final random = Random.secure();
+    settings.browserKey =
+        List.generate(8, (_) => chars[random.nextInt(chars.length)]).join();
+    unawaited(_save());
+    notifyListeners();
+  }
+
+  /// Расширение [client] сообщает, нужен ли ему VPN.
+  void browserRequest(String client, bool on) {
+    final now = DateTime.now();
+    if (on) {
+      _browserClients[client] = now;
+    } else {
+      _browserClients.remove(client);
+    }
+    _browserClients.removeWhere(
+      (_, seen) => now.difference(seen) > const Duration(seconds: 100),
+    );
+    unawaited(_setBrowser(_browserClients.isNotEmpty));
+  }
+
+  String get _tunnelDns =>
+      _validDns(settings.dns) ? settings.dns : probeAddress;
+
+  Future<void> _setBrowser(bool on) async {
+    if (!Platform.isWindows) return;
+    if (on == browserOn) {
+      // Повторная просьба после сбоя — пробуем снова.
+      if (on && browserStatus == VpnStatus.off) await _resumeBrowser();
+      return;
+    }
+    browserOn = on;
+    if (!on) {
+      _browserRun++;
+      await _closeBrowserPath();
+      browserStatus = VpnStatus.off;
+      browserError = null;
+      addLog(tr('VPN в браузере выключен.'));
+      // Туннель был нужен только браузеру — снимаем.
+      if (status == VpnStatus.off) await _tunnel.stop();
+      notifyListeners();
+      return;
+    }
+    await _resumeBrowser();
+  }
+
+  /// Поднимает VPN в браузере в том состоянии, в каком сейчас приложение.
+  Future<void> _resumeBrowser() async {
+    if (!browserOn) return;
+    final profile = server;
+    if (status == VpnStatus.connecting) {
+      // Путь откроет само подключение, когда закончит.
+      browserStatus = VpnStatus.connecting;
+      notifyListeners();
+      return;
+    }
+    if (status == VpnStatus.on && profile != null) {
+      await _openBrowserPath(profile);
+      return;
+    }
+    // Туннель для браузера и так работает (например, не удалось включить
+    // VPN для всей системы, а прежний туннель никто не трогал).
+    if (browserStatus == VpnStatus.on) return;
+    final run = ++_browserRun;
+    browserError = null;
+    if (profile == null) {
+      browserStatus = VpnStatus.off;
+      browserError = tr('Сначала добавьте сервер на вкладке «Сервер».');
+      notifyListeners();
+      return;
+    }
+    if (!elevated) {
+      browserStatus = VpnStatus.off;
+      browserError = tr('Запустите приложение от имени администратора.');
+      notifyListeners();
+      return;
+    }
+    browserStatus = VpnStatus.connecting;
+    notifyListeners();
+    try {
+      await _tunnel.ensureInstalled();
+      if (run != _browserRun || status != VpnStatus.off) return;
+      addLog(tr('Поднимаю туннель AmneziaWG к {0}:{1} только для браузера…',
+          [profile.host, profile.port]));
+      // Системе — никаких маршрутов, кроме DNS-сервера для прокси.
+      await _tunnel.start(buildClientConf(profile, {'$_tunnelDns/32'}));
+      if (run != _browserRun || status != VpnStatus.off) return;
+      if (!await _tunnel.waitForHandshake(const Duration(seconds: 15))) {
+        if (run != _browserRun || status != VpnStatus.off) return;
+        await _tunnel.stop();
+        browserStatus = VpnStatus.off;
+        browserError = tr('Сервер не ответил на рукопожатие. Проверьте, что '
+            'сервер включён и UDP-порт {0} открыт в файрволе хостинга.',
+            [profile.port]);
+        addLog(browserError!);
+        notifyListeners();
+        return;
+      }
+      if (run != _browserRun || status != VpnStatus.off) return;
+      await _openBrowserPath(profile);
+    } catch (e) {
+      if (run != _browserRun) return;
+      browserStatus = VpnStatus.off;
+      browserError = tr('Не удалось включить VPN в браузере: {0}', [e]);
+      addLog(browserError!);
+      notifyListeners();
+    }
+  }
+
+  /// Туннель уже поднят: открываем в нём путь для браузера и прокси.
+  Future<void> _openBrowserPath(ServerProfile profile) async {
+    try {
+      await _tunnel.openBrowserRoute(profile.serverPublicKey);
+      final socks = _socks;
+      if (socks == null) {
+        _socks = await SocksProxy.start(
+          port: browserProxyPort,
+          resolver: TunnelResolver(
+            source: profile.clientAddress,
+            server: _tunnelDns,
+          ),
+          log: addLog,
+        );
+      } else {
+        socks.resolver
+          ..source = profile.clientAddress
+          ..server = _tunnelDns;
+      }
+      // Клиент AmneziaWG при смене сети заново выставляет свои маршруты —
+      // путь для браузера периодически возвращаем.
+      _browserKeeper?.cancel();
+      _browserKeeper = Timer.periodic(const Duration(seconds: 90), (_) {
+        if (browserStatus == VpnStatus.on) {
+          unawaited(_tunnel.openBrowserRoute(profile.serverPublicKey));
+        }
+      });
+      final was = browserStatus;
+      browserStatus = VpnStatus.on;
+      browserError = null;
+      if (was != VpnStatus.on) {
+        addLog(tr('VPN в браузере включён: прокси 127.0.0.1:{0}.',
+            [browserProxyPort]));
+      }
+    } catch (e) {
+      browserStatus = VpnStatus.off;
+      browserError = tr('Не удалось включить VPN в браузере: {0}', [e]);
+      addLog(browserError!);
+    }
+    notifyListeners();
+  }
+
+  Future<void> _closeBrowserPath() async {
+    _browserKeeper?.cancel();
+    _browserKeeper = null;
+    final socks = _socks;
+    _socks = null;
+    await socks?.stop();
+    if (Platform.isWindows) await _tunnel.closeBrowserRoute();
+  }
+
+  /// Домены включённых ресурсов — то, что браузер отправляет через VPN.
+  List<String> get browserDomains => {
+        for (final s in services)
+          if (enabled.contains(s.id)) ...s.domains,
+      }.toList()
+        ..sort();
+
 
   // -------------------------------------------------------------- маршруты
 

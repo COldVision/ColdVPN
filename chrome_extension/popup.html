@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<header>
+  <img src="icons/icon48.png" alt="" width="30" height="30">
+  <div class="title">ColdVPN</div>
+  <div id="appState" class="app-state"></div>
+</header>
+
+<section id="offline" class="view" hidden>
+  <div class="warn"><b data-t="offTitle"></b><p data-t="offText"></p></div>
+  <button id="retry" class="secondary" data-t="retry"></button>
+</section>
+
+<section id="pair" class="view" hidden>
+  <div class="card col">
+    <b class="big" data-t="pairTitle"></b>
+    <p class="muted" data-t="pairText"></p>
+    <input id="key" type="text" maxlength="12" autocomplete="off" spellcheck="false" placeholder="XXXXXXXX">
+    <p id="pairError" class="error collapse" data-t="pairError"></p>
+    <button id="pairSave" class="primary" data-t="pairSave"></button>
+  </div>
+</section>
+
+<section id="main" class="view" hidden>
+  <button id="power" class="power" role="switch" aria-checked="false">
+    <span class="power-icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg></span>
+    <span class="power-text"><span id="powerTitle" class="power-title"></span><span id="powerNote" class="power-note"></span></span>
+  </button>
+
+  <div class="segments" role="radiogroup">
+    <span id="segThumb" class="seg-thumb"></span>
+    <button data-mode="all" role="radio" data-t="modeAll"></button>
+    <button data-mode="fav" role="radio" data-t="modeFav"></button>
+  </div>
+
+  <div class="list-head"><span data-t="favTitle"></span><span id="favCount"></span></div>
+  <div id="list" class="list" role="list"></div>
+  <p id="empty" class="empty" hidden data-t="empty"></p>
+
+  <button id="addFav" class="primary fav-btn">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 4l2.5 5.2 5.7.8-4.1 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4.1-4 5.7-.8z"/></svg>
+    <span class="col-text"><span id="addFavTitle"></span><span id="addFavHost" class="mono-small"></span></span>
+  </button>
+  <button id="addApp" class="secondary app-btn">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 9v6"/><path d="M9 12h6"/></svg>
+    <span id="addAppTitle"></span>
+  </button>
+</section>
+
+<!-- Right-click menu -->
+<div id="ctxLayer" class="ctx-layer" hidden>
+  <div id="ctx" class="ctx" role="menu">
+    <button data-act="edit" role="menuitem" data-t="ctxEdit"></button>
+    <button data-act="toggle" role="menuitem" id="ctxToggle"></button>
+    <button data-act="open" role="menuitem" data-t="ctxOpen"></button>
+    <hr>
+    <button data-act="delete" role="menuitem" class="danger" data-t="ctxDelete"></button>
+  </div>
+</div>
+
+<!-- Bottom sheets -->
+<div id="sheetLayer" class="sheet-layer" hidden>
+  <div id="sheet" class="sheet" role="dialog">
+    <div id="sheetMenu" class="sheet-body" hidden>
+      <div class="sheet-head"><div class="grow"><b id="menuTitle" class="big"></b><div class="muted small" data-t="favSite"></div></div><button class="close" data-close aria-label="×">✕</button></div>
+      <button class="item" data-act="edit"><b data-t="ctxEditPlain"></b><span class="muted small" data-t="editNote"></span></button>
+      <button class="item danger" id="askDelete" data-t="ctxDelete"></button>
+      <div id="confirm" class="confirm collapse">
+        <b id="confirmText"></b>
+        <div class="buttons"><button class="secondary" id="cancelDelete" data-t="keep"></button><button class="danger-btn" id="doDelete" data-t="delete"></button></div>
+      </div>
+    </div>
+    <div id="sheetEdit" class="sheet-body" hidden>
+      <b class="big" data-t="editTitle"></b>
+      <label for="edName" data-t="name"></label>
+      <input id="edName" type="text">
+      <label for="edDomains" data-t="domains"></label>
+      <textarea id="edDomains" rows="4" spellcheck="false"></textarea>
+      <p class="muted small" data-t="domainsNote"></p>
+      <div class="buttons"><button class="secondary" data-close data-t="cancel"></button><button class="primary" id="saveEdit" data-t="save"></button></div>
+    </div>
+    <div id="sheetApp" class="sheet-body" hidden>
+      <b class="big" data-t="appTitle"></b>
+      <p class="muted small" id="appNote"></p>
+      <label for="appName" data-t="resName"></label>
+      <input id="appName" type="text">
+      <label for="appSection" data-t="section"></label>
+      <select id="appSection"></select>
+      <p id="appError" class="error collapse"></p>
+      <div class="buttons"><button class="secondary" data-close data-t="cancel"></button><button class="primary" id="saveApp" data-t="add"></button></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status"></div>
+<script src="common.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>

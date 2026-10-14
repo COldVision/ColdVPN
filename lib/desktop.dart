@@ -42,7 +42,7 @@ class DesktopShell with TrayListener, WindowListener {
       state.addLog(tr('Значок в трее недоступен: {0}', [e]));
     }
 
-    if (startHidden && _tray && state.settings.closeToTray) {
+    if (startHidden && _tray) {
       // Окно показывает сама оболочка Windows после первого кадра, поэтому
       // прячем его сразу следом.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -93,7 +93,7 @@ class DesktopShell with TrayListener, WindowListener {
     if (_quitting) return;
     _quitting = true;
     try {
-      await state.disconnect(remember: false);
+      await state.shutdown();
     } catch (_) {}
     try {
       if (_tray) await trayManager.destroy();

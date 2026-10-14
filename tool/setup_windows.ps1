@@ -103,4 +103,9 @@ Write-Host ''
 $old = Join-Path (Get-Location) 'build\windows\x64\runner\Release\split_vpn.exe'
 if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
 
+# The browser extension sits next to the app: Settings -> Browser extension
+# opens this folder.
+$extension = Join-Path (Get-Location) 'build\windows\x64\runner\Release\chrome_extension'
+if (Test-Path $extension) { Remove-Item $extension -Recurse -Force }
+Copy-Item (Join-Path (Get-Location) 'chrome_extension') $extension -Recurse
 Write-Host 'Done. The app is in build\windows\x64\runner\Release\ (run ColdVPN.exe).'

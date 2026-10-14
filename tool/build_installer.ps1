@@ -42,6 +42,7 @@ try {
     Copy-Item (Join-Path $release 'ColdVPN.exe') $stage
     Copy-Item (Join-Path $release '*.dll') $stage
     Copy-Item (Join-Path $release 'data') $stage -Recurse
+    Copy-Item (Join-Path $project 'chrome_extension') $stage -Recurse
     # Visual C++ runtime next to the app, so that it starts on a clean Windows.
     foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
         $source = Join-Path $env:SystemRoot "System32\$dll"

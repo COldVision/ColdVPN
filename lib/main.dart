@@ -1,8 +1,10 @@
+import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 
 import 'app_state.dart';
+import 'browser_api.dart';
 import 'desktop.dart';
 import 'ui/shell.dart';
 import 'ui/theme.dart';
@@ -16,7 +18,9 @@ Future<void> main(List<String> args) async {
   var desktop = false;
   if (DesktopShell.supported) {
     try {
-      await DesktopShell(state).init(startHidden: args.contains('--hidden'));
+      // «Запускать в свёрнутом режиме»: и при автозапуске, и при обычном
+      // запуске окно не показывается, приложение сразу в трее.
+      await DesktopShell(state).init(startHidden: state.settings.startInTray);
       desktop = true;
     } catch (e) {
       state.addLog(tr('Не удалось настроить окно и трей: {0}', [e]));
@@ -29,6 +33,8 @@ Future<void> main(List<String> args) async {
     state: state,
     handleExit: !desktop && !state.isAndroid,
   ));
+  // Расширение для браузера управляет приложением через 127.0.0.1.
+  if (Platform.isWindows) await BrowserApi(state).start();
   state.autoConnect();
   state.autoUpdateLists();
 }
@@ -58,7 +64,7 @@ class _ColdVpnAppState extends State<ColdVpnApp> {
       // включится сам.
       _lifecycle = AppLifecycleListener(
         onExitRequested: () async {
-          await widget.state.disconnect(remember: false);
+          await widget.state.shutdown();
           return AppExitResponse.exit;
         },
       );

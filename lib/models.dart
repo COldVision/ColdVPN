@@ -269,7 +269,9 @@ class AppSettings {
     this.fullTunnel = false,
     this.appMode = false,
     this.closeToTray = true,
+    this.startInTray = false,
     this.language = '',
+    this.browserKey = '',
     this.autoUpdateLists = true,
   });
 
@@ -298,8 +300,14 @@ class AppSettings {
   /// При закрытии окна прятать приложение в трей, а не выходить.
   bool closeToTray;
 
+  /// Запускать приложение сразу в трей, не показывая окно.
+  bool startInTray;
+
   /// Язык интерфейса: `ru`, `en` или пусто — как в системе.
   String language;
+
+  /// Код, по которому расширение браузера управляет приложением.
+  String browserKey;
 
   /// Раз в неделю обновлять списки сервисов из репозиториев.
   bool autoUpdateLists;
@@ -313,7 +321,9 @@ class AppSettings {
         'fullTunnel': fullTunnel,
         'appMode': appMode,
         'closeToTray': closeToTray,
+        'startInTray': startInTray,
         'language': language,
+        'browserKey': browserKey,
         'autoUpdateLists': autoUpdateLists,
       };
 
@@ -327,7 +337,9 @@ class AppSettings {
       fullTunnel: json['fullTunnel'] as bool? ?? false,
       appMode: json['appMode'] as bool? ?? false,
       closeToTray: json['closeToTray'] as bool? ?? true,
+      startInTray: json['startInTray'] as bool? ?? false,
       language: json['language'] as String? ?? '',
+      browserKey: json['browserKey'] as String? ?? '',
       autoUpdateLists: json['autoUpdateLists'] as bool? ?? true,
     );
   }

@@ -328,6 +328,35 @@ class AwgManager {
     await Process.run('netsh', ['-f', script.path]);
   }
 
+  /// Открывает путь для VPN в браузере: туннель соглашается пересылать
+  /// любые адреса, а маршрут по умолчанию через него получает очень большую
+  /// метрику. Обычные программы по-прежнему идут через основное подключение,
+  /// а соединения, открытые с адреса компьютера в туннеле, уходят в туннель.
+  Future<void> openBrowserRoute(String serverPublicKey) async {
+    final update = File('${dir.path}\\browser.conf');
+    await update.writeAsString([
+      '[Peer]',
+      'PublicKey = $serverPublicKey',
+      'AllowedIPs = 0.0.0.0/0',
+      '',
+    ].join('\r\n'));
+    await Process.run(_awg.path, ['addconf', tunnelName, update.path]);
+    await Process.run('netsh', [
+      'interface', 'ipv4', 'add', 'route', 'prefix=0.0.0.0/0', //
+      'interface=$tunnelName', 'metric=9000', 'store=active',
+    ]);
+  }
+
+  /// Убирает маршрут, добавленный [openBrowserRoute].
+  Future<void> closeBrowserRoute() async {
+    try {
+      await Process.run('netsh', [
+        'interface', 'ipv4', 'delete', 'route', 'prefix=0.0.0.0/0', //
+        'interface=$tunnelName',
+      ]);
+    } catch (_) {}
+  }
+
   /// Последние строки журнала клиента AmneziaWG.
   Future<List<String>> clientLog({int lines = 60}) async {
     if (!_client.existsSync()) {
